@@ -394,8 +394,8 @@ class PixelNeRFRenderer(NeRFRenderer):
         # Extract features from the source image
         source_image_feats = None
         if self.scene_encoder is not None:
-            with torch.no_grad():
-                source_image_feats = self.scene_encoder(source_image)
+            # with torch.no_grad():
+            source_image_feats = self.scene_encoder(source_image)
         # print(source_image_feats.shape)
         # Process the chunks of rays.
         chunk_outputs = [

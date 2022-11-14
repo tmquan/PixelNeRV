@@ -236,7 +236,7 @@ class NeRVLightningModule(LightningModule):
         cams = camera_random
         # # Run the forward pass of the model.
         loss = 0
-        nerf_out, metrics = self.pixelnerfrenderer(
+        nerf_out0, metrics0 = self.pixelnerfrenderer(
             camera_hash=None,
             camera=camera_random,  
             image=src_figure_ct_random.repeat(1,3,1,1).permute(0,2,3,1),
@@ -245,9 +245,9 @@ class NeRVLightningModule(LightningModule):
             source_image=src_figure_ct_locked.repeat(1,3,1,1).permute(0,2,3,1),
             source_depth=None,
         )    
-        loss += metrics["mse_coarse"] + metrics["mse_fine"]
+        loss += metrics0["mse_coarse"] + metrics0["mse_fine"]
 
-        nerf_out, metrics = self.pixelnerfrenderer(
+        nerf_out1, metrics1 = self.pixelnerfrenderer(
             camera_hash=None,
             camera=camera_locked,  
             image=src_figure_ct_locked.repeat(1,3,1,1).permute(0,2,3,1),
@@ -256,9 +256,9 @@ class NeRVLightningModule(LightningModule):
             source_image=src_figure_ct_random.repeat(1,3,1,1).permute(0,2,3,1),
             source_depth=None,
         )    
-        loss += metrics["mse_coarse"] + metrics["mse_fine"]
+        loss += metrics1["mse_coarse"] + metrics1["mse_fine"]
 
-        nerf_out, metrics = self.pixelnerfrenderer(
+        nerf_out2, metrics2 = self.pixelnerfrenderer(
             camera_hash=None,
             camera=camera_locked,  
             image=image2d.repeat(1,3,1,1).permute(0,2,3,1),
@@ -267,26 +267,32 @@ class NeRVLightningModule(LightningModule):
             source_image=image2d.repeat(1,3,1,1).permute(0,2,3,1),
             source_depth=None,
         )    
-        loss += metrics["mse_coarse"] + metrics["mse_fine"]
+        loss += metrics2["mse_coarse"] + metrics2["mse_fine"]
 
 
-        for key in metrics.keys():
-            self.log(f'{stage}_{key}', metrics[key], on_step=(stage == 'train'), 
-                prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        for key in ["mse_fine", "psnr_fine"]:
+            # self.log(f'{stage}_{key}_ct_locked', metrics0[key], on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+            # self.log(f'{stage}_{key}_ct_random', metrics1[key], on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+            self.log(f'{stage}_{key}_xr_locked', metrics2[key], on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        
         # print(nerf_out["rgb_gt"].shape,
         #       nerf_out["rgb_coarse"].shape, 
         #       nerf_out["rgb_fine"].shape)
               
         if batch_idx == 0 and stage != 'train':
             viz2d = torch.cat(
-                        [
-                            torch.cat([src_volume_ct[..., self.shape//2, :],
-                                       src_opaque_ct[..., self.shape//2, :],
-                                       nerf_out["rgb_gt"].permute(0,3,1,2).mean(dim=1, keepdim=True),
-                                       nerf_out["rgb_coarse"].permute(0,3,1,2).mean(dim=1, keepdim=True),
-                                       nerf_out["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True)],
-                                    dim=-2).transpose(2, 3)
-                        ], dim=-2)
+                [
+                    torch.cat([src_volume_ct[..., self.shape//2, :],
+                            #    src_opaque_ct[..., self.shape//2, :],
+                            #    nerf_out["rgb_gt"].permute(0,3,1,2).mean(dim=1, keepdim=True),
+                            #    nerf_out["rgb_coarse"].permute(0,3,1,2).mean(dim=1, keepdim=True),
+                                image2d,
+                                nerf_out0["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True),
+                                nerf_out1["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True),
+                                nerf_out2["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True),
+                            ],
+                            dim=-2).transpose(2, 3)
+                ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
             tensorboard = self.logger.experiment  # type: ignore
             tensorboard.add_image(f'{stage}_samples', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
@@ -375,7 +381,7 @@ if __name__ == "__main__":
             checkpoint_callback,
         ],
         accumulate_grad_batches=5,
-        # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        # strategy="ddp", #"horovod", #"deepspeed", #"ddp_sharded",
         strategy="fsdp",  # "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16,  # if hparams.use_amp else 32,
         # stochastic_weight_avg=True,

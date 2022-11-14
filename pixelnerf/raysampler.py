@@ -6,7 +6,7 @@ from pytorch3d.renderer import MonteCarloRaysampler, NDCGridRaysampler, NDCMulti
 from pytorch3d.renderer.cameras import CamerasBase
 
 from pytorch3d.renderer.implicit.raysampling import _xy_to_ray_bundle
-from pytorch3d.renderer.implicit.sample_pdf import sample_pdf
+from nerf.utils import sample_pdf
 
 from nerf.raysampler import NeRFRaysampler
 
