@@ -7,7 +7,7 @@ from pytorch3d.renderer.implicit.raymarching import (
 )
 
 
-class EmissionAbsorptionRaymarcherFrontToBack(EmissionAbsorptionRaymarcher):
+class EmissionAbsorptionFrontToBackRaymarcher(EmissionAbsorptionRaymarcher):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -28,13 +28,7 @@ class EmissionAbsorptionRaymarcherFrontToBack(EmissionAbsorptionRaymarcher):
         )
         _check_density_bounds(rays_densities)
         rays_densities = rays_densities[..., 0]
-        # print(rays_densities.shape)
-        # absorption = _shifted_cumprod(
-        #     (1.0 + eps) - rays_densities, shift=self.surface_thickness
-        # )
-        # weights = rays_densities * absorption
-        # features = (weights[..., None] * rays_features).sum(dim=-2)
-        # opacities = 1.0 - torch.prod(1.0 - rays_densities, dim=-1, keepdim=True)
+         
         absorption = _shifted_cumprod(
             (1.0 + eps) - rays_densities.flip(dims=(-1,)), shift=-self.surface_thickness
         ).flip(dims=(-1,))  # Reverse the direction of the absorption to match X-ray detector
