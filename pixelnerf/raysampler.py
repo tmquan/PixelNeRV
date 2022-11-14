@@ -339,7 +339,7 @@ class PixelNeRFRaysampler(NeRFRaysampler):
         """
         print(f"Precaching {len(cameras)} ray bundles ...")
         full_chunksize = (
-            self._grid_raysampler._xy_grid.numel()
+            self._grid_raysampler._xy_grid.numel()  # type: ignore
             // 2
             * self._grid_raysampler._n_pts_per_ray
         )
@@ -467,7 +467,14 @@ class PixelNeRFRaysampler(NeRFRaysampler):
                     dtype=torch.long,
                     device=full_ray_bundle.lengths.device,
                 )
-
+            # print(
+            #     full_ray_bundle.directions.shape[:-1],
+            #     n_pixels
+            # )
+            # print(
+            #     len(full_ray_bundle), 
+            #     [v.shape for v in full_ray_bundle]
+            # )
             # Take the "sel_rays" rays from the full ray bundle.
             ray_bundle = RayBundle(
                 *[
@@ -477,6 +484,10 @@ class PixelNeRFRaysampler(NeRFRaysampler):
                     for v in full_ray_bundle
                 ]
             )
+            # print(
+            #     len(ray_bundle), 
+            #     [v.shape for v in full_ray_bundle]
+            # )
 
         if (
             (self._stratified and self.training)

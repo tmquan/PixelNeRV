@@ -338,7 +338,7 @@ class NeRFRaysampler(torch.nn.Module):
             # Take the "sel_rays" rays from the full ray bundle.
             ray_bundle = RayBundle(
                 *[
-                    v.view(n_pixels, -1)[sel_rays]
+                    v.contiguous().view(n_pixels, -1)[sel_rays]
                     .view(batch_size, sel_rays.numel() // batch_size, -1)
                     .to(device)
                     for v in full_ray_bundle

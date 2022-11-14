@@ -235,31 +235,41 @@ class NeRVLightningModule(LightningModule):
         imgs = src_figure_ct_random
         cams = camera_random
         # # Run the forward pass of the model.
+        loss = 0
         nerf_out, metrics = self.pixelnerfrenderer(
             camera_hash=None,
-            camera=join_cameras_as_batch([
-                    camera_random,  # type: ignore
-                    # camera_locked, 
-                ]),  # type: ignore
-            image=torch.cat([
-                    src_figure_ct_random.repeat(1,3,1,1).permute(0,2,3,1),
-                    # image2d.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
-                ]),
+            camera=camera_random,  
+            image=src_figure_ct_random.repeat(1,3,1,1).permute(0,2,3,1),
             depth=None,
-            source_camera=join_cameras_as_batch([
-                    camera_locked,  # type: ignore
-                    # camera_locked, 
-                ]),  # type: ignore
-            source_image=torch.cat([
-                    src_figure_ct_locked.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
-                    # src_figure_ct_locked.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
-                ]), 
+            source_camera=camera_locked,  
+            source_image=src_figure_ct_locked.repeat(1,3,1,1).permute(0,2,3,1),
             source_depth=None,
         )    
-    
+        loss += metrics["mse_coarse"] + metrics["mse_fine"]
 
-        # The loss is a sum of coarse and fine MSEs
-        loss = metrics["mse_coarse"] + metrics["mse_fine"]
+        nerf_out, metrics = self.pixelnerfrenderer(
+            camera_hash=None,
+            camera=camera_locked,  
+            image=src_figure_ct_locked.repeat(1,3,1,1).permute(0,2,3,1),
+            depth=None,
+            source_camera=camera_random,
+            source_image=src_figure_ct_random.repeat(1,3,1,1).permute(0,2,3,1),
+            source_depth=None,
+        )    
+        loss += metrics["mse_coarse"] + metrics["mse_fine"]
+
+        nerf_out, metrics = self.pixelnerfrenderer(
+            camera_hash=None,
+            camera=camera_locked,  
+            image=image2d.repeat(1,3,1,1).permute(0,2,3,1),
+            depth=None,
+            source_camera=camera_locked,  
+            source_image=image2d.repeat(1,3,1,1).permute(0,2,3,1),
+            source_depth=None,
+        )    
+        loss += metrics["mse_coarse"] + metrics["mse_fine"]
+
+
         for key in metrics.keys():
             self.log(f'{stage}_{key}', metrics[key], on_step=(stage == 'train'), 
                 prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
