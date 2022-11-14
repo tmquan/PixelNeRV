@@ -97,17 +97,7 @@ class NeRVLightningModule(LightningModule):
         R_random, T_random = look_at_view_transform(dist=dist_random, elev=elev_random, azim=azim_random)
         camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
 
-        # XR pathway
-        src_figure_xr_hidden = image2d
-        # est_volume_xr = self.forward(src_figure_xr_hidden)
-        # est_opaque_xr = torch.ones_like(est_volume_xr)
-        est_volume_xr, \
-        est_opaque_xr = self.forward(src_figure_xr_hidden)
-        est_figure_xr_locked = self.fwd_renderer.forward(
-            image3d=est_volume_xr, 
-            opacity=est_opaque_xr, 
-            cameras=camera_locked
-        )
+        
 
         # CT pathway
         src_volume_ct = image3d
@@ -122,10 +112,31 @@ class NeRVLightningModule(LightningModule):
             opacity=src_opaque_ct, 
             cameras=camera_random
         )
+
+        # XR pathway
+        src_figure_xr_hidden = image2d
+        # est_volume_xr = self.forward(src_figure_xr_hidden)
+        # est_opaque_xr = torch.ones_like(est_volume_xr)
+        # est_volume_xr, est_opaque_xr = self.forward(src_figure_xr_hidden)
+        # est_figure_xr_locked = self.fwd_renderer.forward(
+        #     image3d=est_volume_xr, 
+        #     opacity=est_opaque_xr, 
+        #     cameras=camera_locked
+        # )
         # est_volume_ct = self.forward(est_figure_ct_locked) # How to augment here?
         # est_opaque_ct = torch.ones_like(est_volume_ct)
-        est_volume_ct, \
-        est_opaque_ct = self.forward(est_figure_ct_locked)
+        # est_volume_ct, est_opaque_ct = self.forward(est_figure_ct_locked)
+
+        figure_dx = torch.cat([src_figure_xr_hidden, est_figure_ct_locked])
+        volume_dx, opaque_dx = self.forward(figure_dx) 
+        est_volume_xr, est_volume_ct = torch.split(volume_dx, self.batch_size)
+        est_opaque_xr, est_opaque_ct = torch.split(opaque_dx, self.batch_size)
+        est_figure_xr_locked = self.fwd_renderer.forward(
+            image3d=est_volume_xr, 
+            opacity=est_opaque_xr, 
+            cameras=camera_locked
+        )
+
         rec_figure_ct_locked = self.fwd_renderer.forward(
             image3d=est_volume_ct, 
             opacity=est_opaque_ct, 
@@ -194,7 +205,7 @@ class NeRVLightningModule(LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=self.lr / 10)
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[20, 100, 200], gamma=0.1)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
         return [optimizer], [scheduler]
 
 
