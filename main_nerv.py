@@ -128,22 +128,25 @@ class NeRVLightningModule(LightningModule):
         # est_volume_ct, est_opaque_ct = self.forward(est_figure_ct_locked)
 
         figure_dx = torch.cat([src_figure_xr_hidden, est_figure_ct_locked])
-        volume_dx, opaque_dx = self.forward(figure_dx) 
-        est_volume_xr, est_volume_ct = torch.split(volume_dx, self.batch_size)
+        denses_dx, opaque_dx = self.forward(figure_dx) 
+        est_denses_xr, est_denses_ct = torch.split(denses_dx, self.batch_size)
+        est_volume_xr = est_denses_xr.mean(dim=1, keepdim=True)
+        est_volume_ct = est_denses_ct.mean(dim=1, keepdim=True)
+
         est_opaque_xr, est_opaque_ct = torch.split(opaque_dx, self.batch_size)
         est_figure_xr_locked = self.fwd_renderer.forward(
-            image3d=est_volume_xr, 
+            image3d=est_denses_xr, 
             opacity=est_opaque_xr, 
             cameras=camera_locked
         )
 
         rec_figure_ct_locked = self.fwd_renderer.forward(
-            image3d=est_volume_ct, 
+            image3d=est_denses_ct, 
             opacity=est_opaque_ct, 
             cameras=camera_locked
         )
         rec_figure_ct_random = self.fwd_renderer.forward(
-            image3d=est_volume_ct, 
+            image3d=est_denses_ct, 
             opacity=est_opaque_ct, 
             cameras=camera_random
         )

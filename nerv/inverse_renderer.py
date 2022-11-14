@@ -83,5 +83,6 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
         shcodes_opacits = self.mixture_net(torch.cat([clarity, density], dim=1))
         shcodes,opacits = torch.split(shcodes_opacits, [self.mid_channels-1, 1], dim=1)
         decomps = (shcodes.to(figures.device)*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1))
-        volumes = decomps.mean(dim=1, keepdim=True)
-        return volumes, F.softplus(opacits)
+        # volumes = decomps.mean(dim=1, keepdim=True)
+        # return volumes, F.softplus(opacits)
+        return decomps, F.softplus(opacits)
