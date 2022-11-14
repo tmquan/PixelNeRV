@@ -288,7 +288,7 @@ class NeRVLightningModule(LightningModule):
                                     dim=-2).transpose(2, 3)
                         ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
-            tensorboard = self.logger.experiment
+            tensorboard = self.logger.experiment  # type: ignore
             tensorboard.add_image(f'{stage}_samples', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
 
         # Loss
