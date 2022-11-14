@@ -88,14 +88,14 @@ class NeRVLightningModule(LightningModule):
         elev_locked = torch.ones(self.batch_size, device=_device) * 0
         azim_locked = torch.ones(self.batch_size, device=_device) * 0
         R_locked, T_locked = look_at_view_transform(dist=dist_locked, elev=elev_locked, azim=azim_locked)
-        camera_locked = FoVPerspectiveCameras(R=R_locked, T=T_locked, fov=45, aspect_ratio=1.1).to(_device)
+        camera_locked = FoVPerspectiveCameras(R=R_locked, T=T_locked, fov=45, aspect_ratio=1).to(_device)
 
         # Construct the random camera
         dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         elev_random = torch.rand(self.batch_size, device=_device) * 180 - 90
         azim_random = torch.rand(self.batch_size, device=_device) * 360
         R_random, T_random = look_at_view_transform(dist=dist_random, elev=elev_random, azim=azim_random)
-        camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1.1).to(_device)
+        camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
 
         # XR pathway
         src_figure_xr_hidden = image2d
