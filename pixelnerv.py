@@ -151,7 +151,7 @@ class NeRVLightningModule(LightningModule):
             density_noise_std=0.0,  
             # PixelNeRFconfig
             scene_encoder=scene_encoder,
-            transform_to_source_view=False,
+            transform_to_source_view=True,
             use_image_feats=True,
             resnetfc=True,
             use_depth=False,
