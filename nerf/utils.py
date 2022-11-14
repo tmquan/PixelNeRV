@@ -114,7 +114,7 @@ def sample_images_at_mc_locs(
     xy_sample = -sampled_rays_xy.view(ba, -1, 1, 2).clone()
 
     images_sampled = torch.nn.functional.grid_sample(
-        target_images.squeeze(0).permute(0, 3, 1, 2),
+        target_images.permute(0, 3, 1, 2),
         xy_sample,
         align_corners=True,
         mode=mode,

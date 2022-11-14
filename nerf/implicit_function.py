@@ -12,7 +12,7 @@ def _xavier_init(linear):
     torch.nn.init.xavier_uniform_(linear.weight.data)
 
 
-class NeuralRadianceField(torch.nn.Module):
+class NeRF(torch.nn.Module):
     def __init__(
         self,
         n_harmonic_functions_xyz: int = 6,
@@ -294,4 +294,3 @@ class MLPWithInputSkips(torch.nn.Module):
             y = layer(y)
         return y
 
-NeuralRadianceField = NeuralRadianceField

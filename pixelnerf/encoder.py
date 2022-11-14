@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from torchvision import transforms as T
 
-from backbone import build_backbone
+from pixelnerf.backbone import build_backbone
 
 
 def maybe_permute(images):

@@ -8,98 +8,221 @@ from pytorch3d.renderer.cameras import CamerasBase
 from pytorch3d.renderer.implicit.raysampling import _xy_to_ray_bundle
 from pytorch3d.renderer.implicit.sample_pdf import sample_pdf
 
+from nerf.raysampler import NeRFRaysampler
 
-class ProbabilisticRaysampler(torch.nn.Module):
+def fibonacci_sphere(samples=1000):
+    points = []
+    phi = math.pi * (3. - math.sqrt(5.))  # golden angle in radians
+
+    for i in range(samples):
+        y = 1 - (i / float(samples - 1)) * 2  # y goes from 1 to -1
+        radius = math.sqrt(1 - y * y)  # radius at y
+
+        theta = phi * i  # golden angle increment
+
+        x = math.cos(theta) * radius
+        z = math.sin(theta) * radius
+
+        points.append((x, y, z))
+
+    return points
+
+
+class SphereRaysampler(torch.nn.Module):
     """
-    Implements the importance sampling of points along rays.
-    The input is a `RayBundle` object with a `ray_weights` tensor
-    which specifies the probabilities of sampling a point along each ray.
-
-    This raysampler is used for the fine rendering pass of NeRF.
-    As such, the forward pass accepts the RayBundle output by the
-    raysampling of the coarse rendering pass. Hence, it does not
-    take cameras as input.
+    Samples rays from a full 3D sphere, so that we can visualize the whole 3D scene.
     """
 
     def __init__(
         self,
         n_pts_per_ray: int,
-        stratified: bool,
-        stratified_test: bool,
-        add_input_samples: bool = True,
+        min_depth: float,
+        max_depth: float,
+        n_rays_per_image: int,
+        image_width: int,
+        image_height: int,
+        stratified: bool = False,
+        stratified_test: bool = False,
     ):
-        """
-        Args:
-            n_pts_per_ray: The number of points to sample along each ray.
-            stratified: If `True`, the input `ray_weights` are assumed to be
-                sampled at equidistant intervals.
-            stratified_test: Same as `stratified` with the difference that this
-                setting is applied when the module is in the `eval` mode
-                (`self.training==False`).
-            add_input_samples: Concatenates and returns the sampled values
-                together with the input samples.
-        """
         super().__init__()
+        self._n_rays_per_image = n_rays_per_image
         self._n_pts_per_ray = n_pts_per_ray
-        self._stratified = stratified
-        self._stratified_test = stratified_test
-        self._add_input_samples = add_input_samples
+        self._min_depth = min_depth
+        self._max_depth = max_depth
+        self._image_width = image_width
+        self._image_height = image_height
+        pass
+
+    def get_n_chunks(self, chunksize: int, batch_size: int):
+        """
+        Returns the total number of `chunksize`-sized chunks
+        of the raysampler's rays.
+        Args:
+            chunksize: The number of rays per chunk.
+            batch_size: The size of the batch of the raysampler.
+        Returns:
+            n_chunks: The total number of chunks.
+        """
+
+        assert batch_size == 1
+        n_chunks = math.ceil(
+            self._image_height * self._image_width / chunksize
+        )
+        return n_chunks
+
+        return 1
 
     def forward(
         self,
-        input_ray_bundle: RayBundle,
-        ray_weights: torch.Tensor,
+        cameras: CamerasBase,
+        chunksize: int = None,
+        chunk_idx: int = 0,
+        camera_hash: str = None,
+        caching: bool = False,
+        target_sem_label=None,
         **kwargs,
     ) -> RayBundle:
+        # we uniformly sample points on a unit sphere as directions
+        # shape: (1, chunk_size, 3)
+        theta = np.linspace(0, 2 * np.pi, self._image_width)
+        phi = np.linspace(0, np.pi, self._image_height)
+        x = np.outer(np.cos(theta), np.sin(phi))[..., None]
+        y = np.outer(np.sin(theta), np.sin(phi))[..., None]
+        z = np.outer(np.ones_like(theta), np.cos(phi))[..., None]
+        dirs = np.concatenate((x, y, z), axis=-1)
+        dirs = np.transpose(dirs, (1, 0, 2))  # (width, height, 3)
+        dirs = dirs.reshape(-1, 3)[None]
+        rays_directions_world_full = torch.cuda.FloatTensor(dirs)
+        rays_directions_world = rays_directions_world_full[:, (
+            chunksize * chunk_idx):(chunksize * (chunk_idx + 1))]
+        real_chunk_size = rays_directions_world.shape[1]
+
+        # origins are the center of the sphere, which is fixed
+        rays_origins_world = cameras.get_camera_center()
+        rays_origins_world = rays_origins_world[None].expand(
+            1, real_chunk_size, 3)
+
+        # zs uniformly sample points from z_near to z_far along the ray direction
+        depths = torch.linspace(
+            self._min_depth,
+            self._max_depth,
+            self._n_pts_per_ray,  # dtype=xy_grid.dtype, device=xy_grid.device
+        )
+        rays_zs = depths[None, None].expand(1, real_chunk_size, 64).cuda()
+        #rays_zs = depths[None, None].expand(batch_size, n_rays_per_image, n_pts_per_ray)
+
+        # xy_grid: it does not matter in our case
+        xy_grid = torch.cuda.FloatTensor(
+            [0.5, 0.5])[None, None].expand(1, real_chunk_size, 2)
+
+        full_ray_bundle = RayBundle(
+            rays_origins_world,  # .view(batch_size, *spatial_size, 3),
+            rays_directions_world,  # .view(batch_size, *spatial_size, 3),
+            rays_zs,  # .view(batch_size, *spatial_size, n_pts_per_ray),
+            xy_grid,
+        )
+
+        # ray_bundle = RayBundle(
+        #     *[
+        #         v.view(n_pixels, -1)[sel_rays]
+        #         .view(batch_size, sel_rays.numel() // batch_size, -1)
+        #         .to(device)
+        #         for v in full_ray_bundle
+        #     ]
+        # )
+
+        return full_ray_bundle
+
+
+class WeightedMonteCarloRaysampler(torch.nn.Module):
+    """
+    Samples a fixed number of pixels within denoted xy bounds uniformly at random.
+    For each pixel, a fixed number of points is sampled along its ray at uniformly-spaced
+    z-coordinates such that the z-coordinates range between a predefined minimum
+    and maximum depth.
+    """
+
+    def __init__(
+        self,
+        min_x: float,
+        max_x: float,
+        min_y: float,
+        max_y: float,
+        n_rays_per_image: int,
+        n_pts_per_ray: int,
+        min_depth: float,
+        max_depth: float,
+    ) -> None:
         """
         Args:
-            input_ray_bundle: An instance of `RayBundle` specifying the
-                source rays for sampling of the probability distribution.
-            ray_weights: A tensor of shape
-                `(..., input_ray_bundle.legths.shape[-1])` with non-negative
-                elements defining the probability distribution to sample
-                ray points from.
+            min_x: The smallest x-coordinate of each ray's source pixel.
+            max_x: The largest x-coordinate of each ray's source pixel.
+            min_y: The smallest y-coordinate of each ray's source pixel.
+            max_y: The largest y-coordinate of each ray's source pixel.
+            n_rays_per_image: The number of rays randomly sampled in each camera.
+            n_pts_per_ray: The number of points sampled along each ray.
+            min_depth: The minimum depth of each ray-point.
+            max_depth: The maximum depth of each ray-point.
+        """
+        super().__init__()
+        self._min_x = min_x
+        self._max_x = max_x
+        self._min_y = min_y
+        self._max_y = max_y
+        self._n_rays_per_image = n_rays_per_image
+        self._n_pts_per_ray = n_pts_per_ray
+        self._min_depth = min_depth
+        self._max_depth = max_depth
 
+    def forward(self, cameras: CamerasBase, **kwargs) -> RayBundle:
+        """
+        Args:
+            cameras: A batch of `batch_size` cameras from which the rays are emitted.
         Returns:
-            ray_bundle: A new `RayBundle` instance containing the input ray
-                points together with `n_pts_per_ray` additional sampled
-                points per ray.
+            A named tuple RayBundle with the following fields:
+            origins: A tensor of shape
+                `(batch_size, n_rays_per_image, 3)`
+                denoting the locations of ray origins in the world coordinates.
+            directions: A tensor of shape
+                `(batch_size, n_rays_per_image, 3)`
+                denoting the directions of each ray in the world coordinates.
+            lengths: A tensor of shape
+                `(batch_size, n_rays_per_image, n_pts_per_ray)`
+                containing the z-coordinate (=depth) of each ray in world units.
+            xys: A tensor of shape
+                `(batch_size, n_rays_per_image, 2)`
+                containing the 2D image coordinates of each ray.
         """
 
-        # Calculate the mid-points between the ray depths.
-        z_vals = input_ray_bundle.lengths
-        batch_size = z_vals.shape[0]
+        batch_size = cameras.R.shape[0]
 
-        # Carry out the importance sampling.
-        with torch.no_grad():
-            z_vals_mid = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
-            z_samples = sample_pdf(
-                z_vals_mid.view(-1, z_vals_mid.shape[-1]),
-                ray_weights.view(-1, ray_weights.shape[-1])[..., 1:-1],
-                self._n_pts_per_ray,
-                det=not (
-                    (self._stratified and self.training)
-                    or (self._stratified_test and not self.training)
-                ),
-            ).view(batch_size, z_vals.shape[1], self._n_pts_per_ray)
+        device = cameras.device
 
-        if self._add_input_samples:
-            # Add the new samples to the input ones.
-            z_vals = torch.cat((z_vals, z_samples), dim=-1)
-        else:
-            z_vals = z_samples
-        # Resort by depth.
-        z_vals, _ = torch.sort(z_vals, dim=-1)
+        # get the initial grid of image xy coords
+        # of shape (batch_size, n_rays_per_image, 2)
+        rays_xy = torch.cat(
+            [
+                torch.rand(
+                    size=(batch_size, self._n_rays_per_image, 1),
+                    dtype=torch.float32,
+                    device=device,
+                )
+                * (high - low)
+                + low
+                for low, high in (
+                    (self._min_x, self._max_x),
+                    (self._min_y, self._max_y),
+                )
+            ],
+            dim=2,
+        )
 
-        return RayBundle(
-            origins=input_ray_bundle.origins,
-            directions=input_ray_bundle.directions,
-            lengths=z_vals,
-            xys=input_ray_bundle.xys,
+        return _xy_to_ray_bundle(
+            cameras, rays_xy, self._min_depth, self._max_depth, self._n_pts_per_ray, unit_directions=False,
         )
 
 
-class NeRFRaysampler(torch.nn.Module):
+class PixelNeRFRaysampler(NeRFRaysampler):
     """
     Implements the raysampler of NeRF.
     Depending on the `self.training` flag, the raysampler either samples
@@ -139,7 +262,17 @@ class NeRFRaysampler(torch.nn.Module):
                 of each ray point during evaluation (`self.training==False`).
         """
 
-        super().__init__()
+        super().__init__(
+            n_pts_per_ray,
+            min_depth,
+            max_depth,
+            n_rays_per_image,
+            image_width,
+            image_height,
+            stratified,
+            stratified_test,
+        )
+
         self._stratified = stratified
         self._stratified_test = stratified_test
 
@@ -179,7 +312,7 @@ class NeRFRaysampler(torch.nn.Module):
         """
         return int(
             math.ceil(
-                (self._grid_raysampler._xy_grid.numel()
+                (self._grid_raysampler._xy_grid.numel()  # type: ignore
                  * 0.5 * batch_size) / chunksize
             )
         )

@@ -8,13 +8,13 @@ from pytorch3d.structures import Pointclouds
 from pytorch3d.vis.plotly_vis import plot_scene
 from visdom import Visdom
 
-from implicit_function import NeuralRadianceField
+from .implicit_function import NeRF
 from .raymarcher import EmissionAbsorptionNeRFRaymarcher
 from .raysampler import NeRFRaysampler, ProbabilisticRaysampler
 from .utils import calc_mse, calc_psnr, sample_images_at_mc_locs
 
 
-class NeuralRadianceFieldRenderer(torch.nn.Module):
+class NeRFRenderer(torch.nn.Module):
     """
     Implements a renderer of a Neural Radiance Field.
 
@@ -149,7 +149,7 @@ class NeuralRadianceFieldRenderer(torch.nn.Module):
             )
 
             # Instantiate the fine/coarse NeuralRadianceField module.
-            self._implicit_function[render_pass] = NeuralRadianceField(
+            self._implicit_function[render_pass] = NeRF(
                 n_harmonic_functions_xyz=n_harmonic_functions_xyz,
                 n_harmonic_functions_dir=n_harmonic_functions_dir,
                 n_hidden_neurons_xyz=n_hidden_neurons_xyz,

@@ -1,3 +1,9 @@
+from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch3d.renderer.cameras import (
+    CamerasBase,
+    FoVPerspectiveCameras,
+    look_at_view_transform
+)
 import os
 import warnings
 
@@ -18,29 +24,18 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 from argparse import ArgumentParser
 from typing import Optional, Sequence
 
-import kornia
-from backbone import build_backbone
 from datamodule import NeRVDataModule
-from encoder import build_spatial_encoder
-from implicit_function import PixelNeuralRadianceField
+
 from monai.networks.layers import *  # Reshape
 from monai.networks.nets import *  # Unet, DenseNet121, Generator
 from pytorch_lightning import LightningModule, Trainer
-from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.utilities.seed import seed_everything
-from raymarcher import *
-from raysampler import *
-from renderer import *
-from rsh import *  # rsh_cart_2, rsh_cart_3
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
-from pytorch3d.renderer import (ImplicitRenderer, NDCMultinomialRaysampler,
-                                VolumeRenderer)
-from pytorch3d.renderer.cameras import (CamerasBase, FoVPerspectiveCameras,
-                                        look_at_view_transform)
-
+from dvr.renderer import DirectVolumeRenderer
+from pixelnerf.renderer import PixelNeRFRenderer
+from pixelnerf.encoder import build_spatial_encoder
 
 def join_cameras_as_batch(cameras_list: Sequence[CamerasBase]) -> CamerasBase:
     """
@@ -117,26 +112,28 @@ class NeRVLightningModule(LightningModule):
         self.save_hyperparameters()
 
         # To build the prior projection
-        raysampler = NDCMultinomialRaysampler(  # NDCGridRaysampler(
-            image_width=self.shape,
-            image_height=self.shape,
-            n_pts_per_ray=320,  # self.shape,
+        self.directvolumerenderer = DirectVolumeRenderer(
+            image_height=self.shape, 
+            image_width=self.shape, 
+            n_pts_per_ray=512,
             min_depth=2.0,
-            max_depth=6.0,
+            max_depth=6.0
         )
 
-        raymarcher = EmissionAbsorptionRaymarcherFrontToBack()  # X-Ray Raymarcher
-
-        renderer = VolumeRenderer(
-            raysampler=raysampler,
-            raymarcher=raymarcher,
+        scene_encoder = build_spatial_encoder(
+            backbone="resnet34",
+            bn="SyncBN",
+            num_layers=4,
+            pretrained=True,
+            norm_type="batch",
+            use_first_pool=True,
+            index_interp="bilinear",
+            index_padding="border",
+            upsample_interp="bilinear",
+            feature_scale=1.0,
         )
-
-        self.visualizer = FigureRenderer(
-            renderer=renderer
-        )
-
-        self.model = PixelNeuralRadianceFieldRenderer(
+        # To build the predictor
+        self.pixelnerfrenderer = PixelNeRFRenderer(
             image_size=(self.shape, self.shape),
             n_pts_per_ray=128,
             n_pts_per_ray_fine=256,
@@ -151,47 +148,16 @@ class NeRVLightningModule(LightningModule):
             n_hidden_neurons_xyz=256,
             n_hidden_neurons_dir=128,
             n_layers_xyz=8,
-            density_noise_std=0.0,    
+            density_noise_std=0.0,  
+            # PixelNeRFconfig
+            scene_encoder=scene_encoder,
+            transform_to_source_view=False,
+            use_image_feats=True,
+            resnetfc=True,
+            use_depth=False,
+            use_view_dirs=True,
         )
-        # # To build the predictor
-        # self.scene_encoder = build_spatial_encoder(
-        #     backbone="resnet34",
-        #     bn="SyncBN",
-        #     num_layers=4,
-        #     pretrained=True,
-        #     norm_type="batch",
-        #     use_first_pool=True,
-        #     index_interp="bilinear",
-        #     index_padding="border",
-        #     upsample_interp="bilinear",
-        #     feature_scale=1,
-        # )
-
-        # implicit_raysampler = PreCacheRaysampler(
-        #     n_pts_per_ray=256,
-        #     n_rays_per_image=1024,
-        #     min_depth=2.0,
-        #     max_depth=6.0,
-        #     image_width=self.shape, 
-        #     image_height=self.shape,
-        #     stratified=True,
-        #     stratified_test=False,
-        # )
-        # # implicit_raysampler = NDCMultinomialRaysampler(  # NDCGridRaysampler(
-        # #     image_width=self.shape,
-        # #     image_height=self.shape,
-        # #     n_pts_per_ray=320,  # self.shape,
-        # #     min_depth=2.0,
-        # #     max_depth=6.0,
-        # # )
-
-        # implicit_raymarcher = EmissionAbsorptionRaymarcherFrontToBack()
-
-        # # Finally, instantiate the implicit renders
-        # self.implicit_renderer = ImplicitRenderer(
-        #     raysampler=implicit_raysampler, 
-        #     raymarcher=implicit_raymarcher,
-        # )
+       
 
         # self.pixelnerfmodel = PixelNeuralRadianceField(
         #     n_harmonic_functions_xyz=10,
@@ -252,88 +218,68 @@ class NeRVLightningModule(LightningModule):
         # Pregenerate the projections for training PixelNeRV
         src_volume_ct = image3d
         src_opaque_ct = torch.ones_like(src_volume_ct)
-        src_figure_ct_locked = self.visualizer.forward(
+        src_figure_ct_locked = self.directvolumerenderer.forward(
             image3d=src_volume_ct, 
             opacity=src_opaque_ct, 
             cameras=camera_locked
         )
         
-        src_figure_ct_random = self.visualizer.forward(
+        src_figure_ct_random = self.directvolumerenderer.forward(
             image3d=src_volume_ct, 
             opacity=src_opaque_ct, 
             cameras=camera_random
         )
 
-        # imgs = torch.cat([src_figure_ct_locked, src_figure_ct_random])
-        # cams = join_cameras_as_batch(cameras_list=[camera_locked, camera_random])
+        # # imgs = torch.cat([src_figure_ct_locked, src_figure_ct_random])
+        # # cams = join_cameras_as_batch(cameras_list=[camera_locked, camera_random])
         imgs = src_figure_ct_random
         cams = camera_random
-        # Run the forward pass of the model.
-        nerf_out, metrics = self.model(
-            None,
-            cams,
-            imgs.repeat(1,3,1,1).permute(0,2,3,1),
-        )
+        # # Run the forward pass of the model.
+        nerf_out, metrics = self.pixelnerfrenderer(
+            camera_hash=None,
+            camera=join_cameras_as_batch([
+                    camera_random,  # type: ignore
+                    # camera_locked, 
+                ]),  # type: ignore
+            image=torch.cat([
+                    src_figure_ct_random.repeat(1,3,1,1).permute(0,2,3,1),
+                    # image2d.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
+                ]),
+            depth=None,
+            source_camera=join_cameras_as_batch([
+                    camera_locked,  # type: ignore
+                    # camera_locked, 
+                ]),  # type: ignore
+            source_image=torch.cat([
+                    src_figure_ct_locked.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
+                    # src_figure_ct_locked.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
+                ]), 
+            source_depth=None,
+        )    
+    
 
         # The loss is a sum of coarse and fine MSEs
         loss = metrics["mse_coarse"] + metrics["mse_fine"]
-
-        # with torch.no_grad():
-        #     source_image_feats = self.scene_encoder(src_figure_ct_concat)
-
-        # # Evaluate the nerf model.
-        # rendered_images_denses, sampled_rays = self.implicit_renderer(
-        #     cameras=camera_random, 
-        #     volumetric_function=self.pixelnerfmodel, 
-        #     source_image_feats=self.scene_encoder(src_figure_ct_locked.repeat(1,3,1,1).permute(0,2,3,1)),
-        #     source_cameras=camera_locked,
-        # )
-        # rendered_images, rendered_denses = (
-        #     rendered_images_denses.split([3, 1], dim=-1)
-        # )
-
-        # loss = self.loss_smoothl1(
-        #     src_figure_ct_random,
-        #     rendered_images
-        # )
-
-        # out, metrics = self.renderer.forward(
-        #     camera_hash=None, 
-        #     depth=None,
-        #     source_image=src_figure_ct_locked.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
-        #     source_camera=camera_locked, 
-        #     image=src_figure_ct_random.repeat(1, 3, 1, 1).permute(0, 2, 3, 1), 
-        #     camera=camera_random,
-        # )
-        # loss = metrics["mse_fine"]
-
-        # # Forward the model with image
-        # rendered_images_denses, sampled_rays = self.renderer_mc(
-        #     cameras=cameras, 
-        #     volumetric_function=self.pixelnerf.forward(
-        #         source_cameras=cameras
-        #     )
-        # )
-
-        # rendered_images, rendered_denses = (
-        #     rendered_images_denses.split([3, 1], dim=-1)
-        # )
-
-        # Compute the color error as the mean huber
-        # loss between the rendered colors and the
-        # sampled target images.
-        # colors_at_rays = sample_images_at_mc_locs(
-        #     src_figure_ct_concat, 
-        #     sampled_rays.xys
-        # )
-
-        # loss = self.loss_smoothl1(
-        #     rendered_images, 
-        #     colors_at_rays,
-        # )
-        
-        # XR pathway
-
+        for key in metrics.keys():
+            self.log(f'{stage}_{key}', metrics[key], on_step=(stage == 'train'), 
+                prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        # print(nerf_out["rgb_gt"].shape,
+        #       nerf_out["rgb_coarse"].shape, 
+        #       nerf_out["rgb_fine"].shape)
+              
+        if batch_idx == 0 and stage != 'train':
+            viz2d = torch.cat(
+                        [
+                            torch.cat([src_volume_ct[..., self.shape//2, :],
+                                       src_opaque_ct[..., self.shape//2, :],
+                                       nerf_out["rgb_gt"].permute(0,3,1,2).mean(dim=1, keepdim=True),
+                                       nerf_out["rgb_coarse"].permute(0,3,1,2).mean(dim=1, keepdim=True),
+                                       nerf_out["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True)],
+                                    dim=-2).transpose(2, 3)
+                        ], dim=-2)
+            grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
+            tensorboard = self.logger.experiment
+            tensorboard.add_image(f'{stage}_samples', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
 
         # Loss
         info = {f'loss': loss}
@@ -362,7 +308,7 @@ class NeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        optimizer = torch.optim.RAdam(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        optimizer = torch.optim.RAdam(self.pixelnerfrenderer.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=self.lr / 10)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[20, 100, 200], gamma=0.1)
         return [optimizer], [scheduler]

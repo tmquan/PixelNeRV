@@ -1,6 +1,5 @@
 import torch
 
-
 class HarmonicEmbedding(torch.nn.Module):
     def __init__(
         self,
