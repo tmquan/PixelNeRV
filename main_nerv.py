@@ -60,7 +60,8 @@ class NeRVLightningModule(LightningModule):
         self.inv_renderer = NeRVFrontToBackInverseRenderer(
             shape=self.shape, 
             in_channels=1, 
-            mid_channels=17, # Spherical Harmonics Level 3
+            # mid_channels=17, # Spherical Harmonics Level 3
+            mid_channels=10, # Spherical Harmonics Level 2
             out_channels=1,
         )
 
@@ -115,25 +116,18 @@ class NeRVLightningModule(LightningModule):
 
         # XR pathway
         src_figure_xr_hidden = image2d
-        # est_volume_xr = self.forward(src_figure_xr_hidden)
-        # est_opaque_xr = torch.ones_like(est_volume_xr)
-        # est_volume_xr, est_opaque_xr = self.forward(src_figure_xr_hidden)
-        # est_figure_xr_locked = self.fwd_renderer.forward(
-        #     image3d=est_volume_xr, 
-        #     opacity=est_opaque_xr, 
-        #     cameras=camera_locked
-        # )
-        # est_volume_ct = self.forward(est_figure_ct_locked) # How to augment here?
-        # est_opaque_ct = torch.ones_like(est_volume_ct)
-        # est_volume_ct, est_opaque_ct = self.forward(est_figure_ct_locked)
 
-        figure_dx = torch.cat([src_figure_xr_hidden, est_figure_ct_locked])
+        figure_dx = torch.cat([src_figure_xr_hidden, est_figure_ct_locked, est_figure_ct_random])
+        
         denses_dx, opaque_dx = self.forward(figure_dx) 
-        est_denses_xr, est_denses_ct = torch.split(denses_dx, self.batch_size)
+        
+        est_denses_xr, est_denses_ct, est_denses_rn = torch.split(denses_dx, self.batch_size)
         est_volume_xr = est_denses_xr.mean(dim=1, keepdim=True)
         est_volume_ct = est_denses_ct.mean(dim=1, keepdim=True)
+        est_volume_rn = est_denses_rn.mean(dim=1, keepdim=True)
 
-        est_opaque_xr, est_opaque_ct = torch.split(opaque_dx, self.batch_size)
+        est_opaque_xr, est_opaque_ct, est_opaque_rn = torch.split(opaque_dx, self.batch_size)
+
         est_figure_xr_locked = self.fwd_renderer.forward(
             image3d=est_denses_xr, 
             opacity=est_opaque_xr, 
@@ -146,19 +140,20 @@ class NeRVLightningModule(LightningModule):
             cameras=camera_locked
         )
         rec_figure_ct_random = self.fwd_renderer.forward(
-            image3d=est_denses_ct, 
-            opacity=est_opaque_ct, 
+            image3d=est_denses_rn, 
+            opacity=est_opaque_rn, 
             cameras=camera_random
         )
 
         # Compute the loss
-        im3d_loss = self.loss_smoothl1(src_volume_ct, est_volume_ct) 
+        im3d_loss = self.loss_smoothl1(src_volume_ct, est_volume_ct) \
+                  + self.loss_smoothl1(src_volume_ct, est_volume_rn) 
                   
         im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked) \
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random) \
                   + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked)
 
-        loss = 3 * im3d_loss + im2d_loss 
+        loss = im3d_loss + im2d_loss 
 
         if batch_idx == 0:
             viz2d = torch.cat([
