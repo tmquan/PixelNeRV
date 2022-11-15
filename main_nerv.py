@@ -52,7 +52,7 @@ class NeRVLightningModule(LightningModule):
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
             image_height=self.shape, 
-            n_pts_per_ray=512, 
+            n_pts_per_ray=400, 
             min_depth=2.0, 
             max_depth=6.0
         )
@@ -145,12 +145,25 @@ class NeRVLightningModule(LightningModule):
             cameras=camera_random
         )
 
+        rec_figure_ct_locked_ = self.fwd_renderer.forward(
+            image3d=est_denses_rn, 
+            opacity=est_opaque_ct, 
+            cameras=camera_locked
+        )
+        rec_figure_ct_random_ = self.fwd_renderer.forward(
+            image3d=est_denses_ct, 
+            opacity=est_opaque_rn, 
+            cameras=camera_random
+        )
+
         # Compute the loss
         im3d_loss = self.loss_smoothl1(src_volume_ct, est_volume_ct) \
                   + self.loss_smoothl1(src_volume_ct, est_volume_rn) 
                   
         im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked) \
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random) \
+                  + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked_) \
+                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_) \
                   + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked)
 
         loss = im3d_loss + im2d_loss 
