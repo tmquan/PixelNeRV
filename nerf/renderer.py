@@ -2,15 +2,14 @@ import math
 from typing import List, Optional, Tuple
 
 import torch
-from dvr.raymarcher import EmissionAbsorptionFrontToBackRaymarcher as EmissionAbsorptionNeRFRaymarcher
-from visdom import Visdom
-
 from pytorch3d.renderer import ImplicitRenderer, ray_bundle_to_ray_points
 from pytorch3d.renderer.cameras import CamerasBase
 from pytorch3d.structures import Pointclouds
 from pytorch3d.vis.plotly_vis import plot_scene
+from visdom import Visdom
 
 from .implicit_function import NeRF
+from .raymarcher import EmissionAbsorptionNeRFRaymarcher
 from .raysampler import NeRFRaysampler, ProbabilisticRaysampler
 from .utils import calc_mse, calc_psnr, sample_images_at_mc_locs
 

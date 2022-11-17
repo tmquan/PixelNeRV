@@ -6,9 +6,10 @@ from pytorch3d.renderer import MonteCarloRaysampler, NDCGridRaysampler, NDCMulti
 from pytorch3d.renderer.cameras import CamerasBase
 
 from pytorch3d.renderer.implicit.raysampling import _xy_to_ray_bundle
-from nerf.utils import sample_pdf
+from pytorch3d.renderer.implicit.sample_pdf import sample_pdf
 
 from nerf.raysampler import NeRFRaysampler
+
 
 def fibonacci_sphere(samples=1000):
     points = []
@@ -472,7 +473,7 @@ class PixelNeRFRaysampler(NeRFRaysampler):
             #     n_pixels
             # )
             # print(
-            #     len(full_ray_bundle), 
+            #     len(full_ray_bundle),
             #     [v.shape for v in full_ray_bundle]
             # )
             # Take the "sel_rays" rays from the full ray bundle.
@@ -485,7 +486,7 @@ class PixelNeRFRaysampler(NeRFRaysampler):
                 ]
             )
             # print(
-            #     len(ray_bundle), 
+            #     len(ray_bundle),
             #     [v.shape for v in full_ray_bundle]
             # )
 

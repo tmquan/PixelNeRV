@@ -73,21 +73,22 @@ class PixelNeRFLightningModule(LightningModule):
         )
 
         self.inv_renderer = PixelNeRFRenderer(
-            image_size=[self.shape, self.shape],
-            n_pts_per_ray=128,
-            n_pts_per_ray_fine=256,
+            image_size=(self.shape, self.shape),
+            n_pts_per_ray=256,
+            n_pts_per_ray_fine=512,
             n_rays_per_image=1024,
             min_depth=2.0,
             max_depth=6.0,
             stratified=True,
             stratified_test=False,
             chunk_size_test=4096,
-            n_harmonic_functions_xyz=10,
-            n_harmonic_functions_dir=4,
-            n_hidden_neurons_xyz=256,
-            n_hidden_neurons_dir=128,
+            n_harmonic_functions_xyz=20,  # 10,
+            n_harmonic_functions_dir=20,  # 4,
+            n_hidden_neurons_xyz=512,  # 256,
+            n_hidden_neurons_dir=512,  # 128,
             n_layers_xyz=8,
             density_noise_std=0.0,
+            # PixelNeRFconfig
             scene_encoder=scene_encoder,
             transform_to_source_view=True,
             use_image_feats=True,
@@ -136,13 +137,13 @@ class PixelNeRFLightningModule(LightningModule):
         src_opaque_ct = torch.ones_like(src_volume_ct)
         est_figure_ct_locked = self.fwd_renderer.forward(
             image3d=src_volume_ct, 
+            cameras=camera_locked,
             opacity=src_opaque_ct, 
-            cameras=camera_locked
         )
         est_figure_ct_random = self.fwd_renderer.forward(
             image3d=src_volume_ct, 
+            cameras=camera_random,
             opacity=src_opaque_ct, 
-            cameras=camera_random
         )
 
         # XR pathway

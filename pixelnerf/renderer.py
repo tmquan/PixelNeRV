@@ -1,9 +1,9 @@
 from .raysampler import SphereRaysampler, PixelNeRFRaysampler
-from nerf.raysampler import ProbabilisticRaysampler
-from dvr.raymarcher import EmissionAbsorptionFrontToBackRaymarcher as EmissionAbsorptionNeRFFrontToBackRaymarcher
 from .implicit_function import PixelNeRF
-from nerf.renderer import NeRFRenderer
 from nerf.utils import calc_mse, calc_psnr, sample_images_at_mc_locs
+from nerf.raysampler import NeRFRaysampler, ProbabilisticRaysampler
+from nerf.raymarcher import EmissionAbsorptionNeRFRaymarcherFrontToBack
+from nerf.renderer import NeRFRenderer
 
 from pytorch3d.renderer import RayBundle, ray_bundle_to_ray_points
 from pytorch3d.renderer.cameras import CamerasBase
@@ -147,7 +147,7 @@ class PixelNeRFRenderer(NeRFRenderer):
         self._implicit_function = torch.nn.ModuleDict()
 
         # Init the EA raymarcher used by both passes.
-        raymarcher = EmissionAbsorptionNeRFFrontToBackRaymarcher()
+        raymarcher = EmissionAbsorptionNeRFRaymarcherFrontToBack()
 
         # Parse out image dimensions.
         image_height, image_width = image_size
@@ -254,7 +254,8 @@ class PixelNeRFRenderer(NeRFRenderer):
                 volumetric_function=self._implicit_function[renderer_pass],
                 chunksize=self._chunk_size_test,
                 chunk_idx=chunk_idx,
-                density_noise_std=(self._density_noise_std if self.training else 0.0),
+                density_noise_std=(
+                    self._density_noise_std if self.training else 0.0),
                 input_ray_bundle=coarse_ray_bundle,
                 ray_weights=coarse_weights,
                 camera_hash=camera_hash,
@@ -393,8 +394,8 @@ class PixelNeRFRenderer(NeRFRenderer):
         # Extract features from the source image
         source_image_feats = None
         if self.scene_encoder is not None:
-            # with torch.no_grad():
-            source_image_feats = self.scene_encoder(source_image)
+            with torch.no_grad():
+                source_image_feats = self.scene_encoder(source_image)
         # print(source_image_feats.shape)
         # Process the chunks of rays.
         chunk_outputs = [
@@ -515,14 +516,16 @@ class PixelNeRFRenderer(NeRFRenderer):
             chunk_rgb_fine = chunk_outputs[chunk_idx]['rgb_fine']
             chunk_depth_fine = chunk_outputs[chunk_idx]['depth_fine']
             chunk_ray_bundle = chunk_outputs[chunk_idx]['coarse_ray_bundle']
-            chunk_points = chunk_ray_bundle.origins.cuda() + chunk_depth_fine * chunk_ray_bundle.directions.cuda()
+            chunk_points = chunk_ray_bundle.origins.cuda() + chunk_depth_fine * \
+                chunk_ray_bundle.directions.cuda()
 
             rgb_fine.append(chunk_rgb_fine)
             depth_fine.append(chunk_depth_fine)
             points.append(chunk_points)
 
         rgb_fine = torch.cat(rgb_fine, dim=1).view(-1, *self._image_size, 3)
-        depth_fine = torch.cat(depth_fine, dim=1).view(-1, *self._image_size, 1)
+        depth_fine = torch.cat(
+            depth_fine, dim=1).view(-1, *self._image_size, 1)
         points = torch.cat(points, dim=1)
 
         # rgb_fine = chunk_outputs[0]['rgb_fine']
