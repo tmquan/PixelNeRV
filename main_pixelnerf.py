@@ -51,9 +51,9 @@ class PixelNeRFLightningModule(LightningModule):
         self.save_hyperparameters()
 
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
-            image_width=self.shape, 
-            image_height=self.shape, 
-            n_pts_per_ray=400, 
+            image_width=self.shape*2, 
+            image_height=self.shape*2, 
+            n_pts_per_ray=512, 
             min_depth=2.0, 
             max_depth=6.0
         )
@@ -73,7 +73,7 @@ class PixelNeRFLightningModule(LightningModule):
         )
 
         self.inv_renderer = PixelNeRFRenderer(
-            image_size=(self.shape, self.shape),
+            image_size=(self.shape*2, self.shape*2),
             n_pts_per_ray=256,
             n_pts_per_ray_fine=512,
             n_rays_per_image=1024,
@@ -181,18 +181,18 @@ class PixelNeRFLightningModule(LightningModule):
         im2d_loss = metrics_ct_random["mse_coarse"] + metrics_ct_random["mse_fine"] \
                   + metrics_ct_locked["mse_coarse"] + metrics_ct_locked["mse_fine"] \
                   + metrics_xr_locked["mse_coarse"] + metrics_xr_locked["mse_fine"] 
-        
-        if batch_idx == 0:
+
+        if batch_idx == 0 and stage!='train':
             viz2d = torch.cat([
-                        torch.cat([src_volume_ct[..., self.shape//2, :], 
-                                   est_figure_ct_locked, 
+                        torch.cat([est_figure_ct_locked, 
                                    est_figure_ct_random, 
                                    out_ct_random["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
                                    out_ct_locked["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
                                    src_figure_xr_hidden, 
                                    out_xr_locked["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
                                    ], dim=-2).transpose(2, 3),
-                        # torch.cat([rec_figure_ct_random,
+                        # torch.cat([src_volume_ct[..., self.shape//2, :], 
+                        #            rec_figure_ct_random,
                         #            rec_figure_ct_locked,
                         #            src_figure_xr_hidden,
                         #            est_volume_xr[..., self.shape//2, :],
@@ -391,7 +391,7 @@ if __name__ == "__main__":
         val_samples=hparams.val_samples,
         test_samples=hparams.test_samples,
         batch_size=hparams.batch_size,
-        img_shape=hparams.shape,
+        img_shape=hparams.shape*2,
         vol_shape=hparams.shape
     )
     datamodule.setup()
