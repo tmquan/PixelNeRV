@@ -152,35 +152,57 @@ class PixelNeRFLightningModule(LightningModule):
         out_ct_random, metrics_ct_random = self.inv_renderer.forward(
             camera_hash=None, 
             depth=None,
-            source_image=est_figure_ct_locked.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
+            source_image=est_figure_ct_locked.repeat(1,3,1,1).permute(0,2,3,1),
             source_camera=camera_locked, 
-            image=est_figure_ct_random.repeat(1, 3, 1, 1).permute(0, 2, 3, 1), 
+            image=est_figure_ct_random.repeat(1,3,1,1).permute(0,2,3,1), 
             camera=camera_random,
         )
 
         out_ct_locked, metrics_ct_locked = self.inv_renderer.forward(
             camera_hash=None, 
             depth=None,
-            source_image=est_figure_ct_random.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
+            source_image=est_figure_ct_random.repeat(1,3,1,1).permute(0,2,3,1),
             source_camera=camera_random, 
-            image=est_figure_ct_locked.repeat(1, 3, 1, 1).permute(0, 2, 3, 1), 
+            image=est_figure_ct_locked.repeat(1,3,1,1).permute(0,2,3,1), 
             camera=camera_locked,
+        )
+
+        out_xr_hidden, metrics_xr_hidden = self.inv_renderer.forward(
+            camera_hash=None, 
+            depth=None,
+            source_image=src_figure_xr_hidden.repeat(1,3,1,1).permute(0,2,3,1),
+            source_camera=camera_locked, 
+            image=src_figure_xr_hidden.repeat(1,3,1,1).permute(0,2,3,1), 
+            camera=camera_locked,
+        )
+
+        out_xr_random, metrics_xr_random = self.inv_renderer.forward(
+            camera_hash=None, 
+            depth=None,
+            source_image=src_figure_xr_hidden.repeat(1,3,1,1).permute(0,2,3,1),
+            source_camera=camera_locked, 
+            image=None, 
+            camera=camera_random,
+            fine_or_both="fine",
         )
 
         out_xr_locked, metrics_xr_locked = self.inv_renderer.forward(
             camera_hash=None, 
             depth=None,
-            source_image=src_figure_xr_hidden.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
-            source_camera=camera_locked, 
-            image=src_figure_xr_hidden.repeat(1, 3, 1, 1).permute(0, 2, 3, 1), 
+            source_image=out_xr_random["rgb_fine"].clamp(0.0, 1.0),
+            source_camera=camera_random, 
+            image=None, 
             camera=camera_locked,
+            fine_or_both="fine",
         )
 
         #TODO: Add Orthogonal Camera
         im3d_loss = 0
         im2d_loss = metrics_ct_random["mse_coarse"] + metrics_ct_random["mse_fine"] \
                   + metrics_ct_locked["mse_coarse"] + metrics_ct_locked["mse_fine"] \
-                  + metrics_xr_locked["mse_coarse"] + metrics_xr_locked["mse_fine"] 
+                  + metrics_xr_hidden["mse_coarse"] + metrics_xr_hidden["mse_fine"] \
+                  + self.loss_smoothl1(out_xr_random["rgb_gt"],
+                                       out_xr_locked["rgb_fine"])
 
         if batch_idx == 0 and stage!='train':
             viz2d = torch.cat([
@@ -188,15 +210,12 @@ class PixelNeRFLightningModule(LightningModule):
                                    est_figure_ct_random, 
                                    out_ct_random["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
                                    out_ct_locked["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
-                                   src_figure_xr_hidden, 
-                                   out_xr_locked["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
                                    ], dim=-2).transpose(2, 3),
-                        # torch.cat([src_volume_ct[..., self.shape//2, :], 
-                        #            rec_figure_ct_random,
-                        #            rec_figure_ct_locked,
-                        #            src_figure_xr_hidden,
-                        #            est_volume_xr[..., self.shape//2, :],
-                        #            est_figure_xr_locked,], dim=-2).transpose(2, 3)
+                        torch.cat([src_figure_xr_hidden, 
+                                   out_xr_hidden["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
+                                   out_xr_random["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
+                                   out_xr_locked["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
+                                   ], dim=-2).transpose(2, 3)
                     ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
             tensorboard = self.logger.experiment

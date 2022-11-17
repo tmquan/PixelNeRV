@@ -329,7 +329,8 @@ class PixelNeRFRenderer(NeRFRenderer):
         depth: torch.Tensor,
         source_camera: CamerasBase,
         source_image: torch.Tensor,
-        source_depth: torch.Tensor = None,
+        source_depth: torch.Tensor = None, 
+        fine_or_both: str = "both",
     ) -> Tuple[dict, dict]:
         """
         Performs the coarse and fine rendering passes of the radiance field
@@ -381,7 +382,7 @@ class PixelNeRFRenderer(NeRFRenderer):
                 `psnr_fine`: Peak signal-to-noise ratio between the fine render and
                     the input `image`
         """
-        if not self.training:
+        if not self.training or fine_or_both=="fine":
             # Full evaluation pass.
             n_chunks = self._renderer["coarse"].raysampler.get_n_chunks(
                 self._chunk_size_test,
@@ -394,9 +395,9 @@ class PixelNeRFRenderer(NeRFRenderer):
         # Extract features from the source image
         source_image_feats = None
         if self.scene_encoder is not None:
-            with torch.no_grad():
-                source_image_feats = self.scene_encoder(source_image)
-        # print(source_image_feats.shape)
+            # with torch.no_grad():
+            source_image_feats = self.scene_encoder(source_image)
+
         # Process the chunks of rays.
         chunk_outputs = [
             self._process_ray_chunk(
