@@ -157,6 +157,7 @@ class ResNetEncoder(nn.Module):
         self.latents = latents
         align_corners = None if self.index_interp == "nearest " else True
         latent_sz = latents[0].shape[-2:]
+        # [print(s.shape) for s in latents]
         for i in range(len(latents)):
             latents[i] = F.interpolate(
                 latents[i],
@@ -164,11 +165,12 @@ class ResNetEncoder(nn.Module):
                 mode=self.upsample_interp,
                 align_corners=align_corners,
             )
+
         self.latent = torch.cat(latents, dim=1)
         self.latent_scaling[0] = self.latent.shape[-1]
         self.latent_scaling[1] = self.latent.shape[-2]
         self.latent_scaling = self.latent_scaling / (self.latent_scaling - 1) * 2.0
-
+        
         return self.latent
 
 

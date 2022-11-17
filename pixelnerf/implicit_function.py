@@ -159,6 +159,7 @@ class ResnetFC(nn.Module):
 
         # assert zx.size(-1) == self.d_latent + self.d_in
         if self.d_latent > 0:
+            # print(z.shape[-1], self.d_latent)
             assert z.shape[-1] == self.d_latent
         else:
             raise ValueError("unsupported")
@@ -274,6 +275,7 @@ class PixelNeRF(NeRF):
             #     n_classes=n_classes, 
             #     use_depth=use_depth
             # )
+            # print(image_feature_dim)
             self.mlp_xyz = ResnetFC(
                 d_latent=image_feature_dim, 
                 d_in=embedding_dim_xyz, 
