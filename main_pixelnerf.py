@@ -79,7 +79,7 @@ class PixelNeRFLightningModule(LightningModule):
             n_rays_per_image=1024,
             min_depth=2.0,
             max_depth=6.0,
-            stratified=True,
+            stratified=False,
             stratified_test=False,
             chunk_size_test=4096,
             n_harmonic_functions_xyz=20,  # 10,
