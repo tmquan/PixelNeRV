@@ -2,7 +2,7 @@ import math
 from typing import List, Optional, Tuple
 
 import torch
-from nerf.raymarcher import EmissionAbsorptionRaymarcher as EmissionAbsorptionNeRFRaymarcher
+from dvr.raymarcher import EmissionAbsorptionFrontToBackRaymarcher as EmissionAbsorptionNeRFRaymarcher
 from visdom import Visdom
 
 from pytorch3d.renderer import ImplicitRenderer, ray_bundle_to_ray_points

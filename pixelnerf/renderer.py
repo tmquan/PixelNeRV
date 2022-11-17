@@ -254,8 +254,7 @@ class PixelNeRFRenderer(NeRFRenderer):
                 volumetric_function=self._implicit_function[renderer_pass],
                 chunksize=self._chunk_size_test,
                 chunk_idx=chunk_idx,
-                density_noise_std=(
-                    self._density_noise_std if self.training else 0.0),
+                density_noise_std=(self._density_noise_std if self.training else 0.0),
                 input_ray_bundle=coarse_ray_bundle,
                 ray_weights=coarse_weights,
                 camera_hash=camera_hash,
@@ -516,16 +515,14 @@ class PixelNeRFRenderer(NeRFRenderer):
             chunk_rgb_fine = chunk_outputs[chunk_idx]['rgb_fine']
             chunk_depth_fine = chunk_outputs[chunk_idx]['depth_fine']
             chunk_ray_bundle = chunk_outputs[chunk_idx]['coarse_ray_bundle']
-            chunk_points = chunk_ray_bundle.origins.cuda() + chunk_depth_fine * \
-                chunk_ray_bundle.directions.cuda()
+            chunk_points = chunk_ray_bundle.origins.cuda() + chunk_depth_fine * chunk_ray_bundle.directions.cuda()
 
             rgb_fine.append(chunk_rgb_fine)
             depth_fine.append(chunk_depth_fine)
             points.append(chunk_points)
 
         rgb_fine = torch.cat(rgb_fine, dim=1).view(-1, *self._image_size, 3)
-        depth_fine = torch.cat(
-            depth_fine, dim=1).view(-1, *self._image_size, 1)
+        depth_fine = torch.cat(depth_fine, dim=1).view(-1, *self._image_size, 1)
         points = torch.cat(points, dim=1)
 
         # rgb_fine = chunk_outputs[0]['rgb_fine']

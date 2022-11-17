@@ -31,12 +31,14 @@ from pytorch_lightning import Trainer, LightningModule
 from argparse import ArgumentParser
 from typing import Optional, Sequence
 
+from monai.networks.nets import VarAutoEncoder
+from monai.networks.layers.factories import Act, Norm
 
 from datamodule import UnpairedDataModule
 from nerv.inverse_renderer import NeRVFrontToBackInverseRenderer
 from dvr.renderer import DirectVolumeFrontToBackRenderer
 
-class NeRVLightningModule(LightningModule):
+class IRVAELightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
         super().__init__()
         self.logsdir = hparams.logsdir
@@ -49,23 +51,40 @@ class NeRVLightningModule(LightningModule):
         self.devices = hparams.devices
         self.save_hyperparameters()
 
-        self.fwd_renderer = DirectVolumeFrontToBackRenderer(
-            image_width=self.shape, 
-            image_height=self.shape, 
+        self.renderer = DirectVolumeFrontToBackRenderer(
+            image_width=512, 
+            image_height=512, 
             n_pts_per_ray=400, 
             min_depth=2.0, 
             max_depth=6.0
         )
 
-        self.inv_renderer = NeRVFrontToBackInverseRenderer(
-            shape=self.shape, 
-            in_channels=1, 
-            # mid_channels=17, # Spherical Harmonics Level 3
-            mid_channels=10, # Spherical Harmonics Level 2
+        self.vae3d = VarAutoEncoder(
+            spatial_dims=3, 
+            in_shape=(1, 256, 256, 256),
             out_channels=1,
+            latent_size=64,
+            channels=(16, 32, 48, 64),
+            strides=(1, 2, 2, 2), 
+            dropout=0.5,
+            norm=Norm.BATCH,
+            use_sigmoid=True
         )
 
-        self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
+        # self.vae2d = VarAutoEncoder(
+        #     spatial_dims=2, 
+        #     in_shape=(1, 512, 512),
+        #     out_channels=1,
+        #     latent_size=64,
+        #     channels=(16, 32, 64, 80),
+        #     strides=(1, 2, 2, 2), 
+        #     dropout=0.5,
+        #     norm=Norm.BATCH,
+        #     use_sigmoid=True
+        # )
+
+        self.loss_sl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
+        self.loss_bce = torch.nn.BCEWithLogitsLoss(reduction='sum')
         
     def forward(self, figures):
         return self.inv_renderer(figures)    
@@ -85,109 +104,70 @@ class NeRVLightningModule(LightningModule):
                 image3d = alpha_ * image3d + (1 - alpha_) * noises
 
         # Construct the locked camera
-        dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
-        elev_locked = torch.ones(self.batch_size, device=_device) * 0
-        azim_locked = torch.ones(self.batch_size, device=_device) * 0
-        R_locked, T_locked = look_at_view_transform(dist=dist_locked, elev=elev_locked, azim=azim_locked)
-        camera_locked = FoVPerspectiveCameras(R=R_locked, T=T_locked, fov=45, aspect_ratio=1).to(_device)
+        dist = 4.0 * torch.ones(self.batch_size, device=_device)
+        elev = torch.ones(self.batch_size, device=_device) * 0
+        azim = torch.ones(self.batch_size, device=_device) * 0
+        R, T = look_at_view_transform(dist=dist, elev=elev, azim=azim)
+        cameras = FoVPerspectiveCameras(R=R, T=T, fov=45, aspect_ratio=1).to(_device)
 
-        # Construct the random camera
-        dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
-        elev_random = torch.rand(self.batch_size, device=_device) * 180 - 90
-        azim_random = torch.rand(self.batch_size, device=_device) * 360
-        R_random, T_random = look_at_view_transform(dist=dist_random, elev=elev_random, azim=azim_random)
-        camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
-
-        
+        # # Construct the random camera
+        # dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
+        # elev_random = torch.rand(self.batch_size, device=_device) * 180 - 90
+        # azim_random = torch.rand(self.batch_size, device=_device) * 360
+        # R_random, T_random = look_at_view_transform(dist=dist_random, elev=elev_random, azim=azim_random)
+        # camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
 
         # CT pathway
-        src_volume_ct = image3d
-        src_opaque_ct = torch.ones_like(src_volume_ct)
-        est_figure_ct_locked = self.fwd_renderer.forward(
-            image3d=src_volume_ct, 
-            opacity=src_opaque_ct, 
-            cameras=camera_locked
-        )
-        est_figure_ct_random = self.fwd_renderer.forward(
-            image3d=src_volume_ct, 
-            opacity=src_opaque_ct, 
-            cameras=camera_random
+        image3d_alp = torch.ones_like(image3d)
+        image3d_prj = self.renderer.forward(
+            image3d=image3d, 
+            opacity=image3d_alp, 
+            cameras=cameras
         )
 
-        # XR pathway
-        src_figure_xr_hidden = image2d
+        image3d_rec, mu3d, logvar3d, z3d = self.vae3d(image3d)
+        # image3d_rep, mu2d, logvar2d, z2d = self.vae2d(image3d_prj)
+        # image2d_rec, mu2x, logvar2x, z2x = self.vae2d(image2d)
 
-        figure_dx = torch.cat([src_figure_xr_hidden, est_figure_ct_locked, est_figure_ct_random])
-        
-        denses_dx, opaque_dx = self.forward(figure_dx) 
-        
-        est_denses_xr, est_denses_ct, est_denses_rn = torch.split(denses_dx, self.batch_size)
-        est_volume_xr = est_denses_xr.mean(dim=1, keepdim=True)
-        est_volume_ct = est_denses_ct.mean(dim=1, keepdim=True)
-        est_volume_rn = est_denses_rn.mean(dim=1, keepdim=True)
-
-        est_opaque_xr, est_opaque_ct, est_opaque_rn = torch.split(opaque_dx, self.batch_size)
-
-        est_figure_xr_locked = self.fwd_renderer.forward(
-            image3d=est_denses_xr, 
-            opacity=est_opaque_xr, 
-            cameras=camera_locked
-        )
-
-        rec_figure_ct_locked = self.fwd_renderer.forward(
-            image3d=est_denses_ct, 
-            opacity=est_opaque_ct, 
-            cameras=camera_locked
-        )
-        rec_figure_ct_random = self.fwd_renderer.forward(
-            image3d=est_denses_rn, 
-            opacity=est_opaque_rn, 
-            cameras=camera_random
-        )
-
-        rec_figure_ct_locked_ = self.fwd_renderer.forward(
-            image3d=est_denses_rn, 
-            opacity=est_opaque_ct, 
-            cameras=camera_locked
-        )
-        rec_figure_ct_random_ = self.fwd_renderer.forward(
-            image3d=est_denses_ct, 
-            opacity=est_opaque_rn, 
-            cameras=camera_random
-        )
-
-        # Compute the loss
-        im3d_loss = self.loss_smoothl1(src_volume_ct, est_volume_ct) \
-                  + self.loss_smoothl1(src_volume_ct, est_volume_rn) 
-                  
-        im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked) \
-                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random) \
-                  + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked_) \
-                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_) \
-                  + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked)
-
-        loss = im3d_loss + im2d_loss 
+        # Decode the Xray
+        # image2d_rep = self.vae3d.decode_forward(z2x, use_sigmoid=True)
+        mu2d, logvar2d = torch.std(image2d, dim=[1,2,3], keepdim=False)
+        z2d = self.vae3d.reparameterize(mu2d, logvar2d)
+        image2d_rep = self.vae3d.decode_forward(z2d, use_sigmoid=True)
 
         if batch_idx == 0:
             viz2d = torch.cat([
-                        torch.cat([src_volume_ct[..., self.shape//2, :],
-                                   est_opaque_ct[..., self.shape//2, :],
-                                   est_figure_ct_random,
-                                   est_figure_ct_locked,
-                                   est_volume_ct[..., self.shape//2, :],], dim=-2).transpose(2, 3),
-                        torch.cat([rec_figure_ct_random,
-                                   rec_figure_ct_locked,
-                                   src_figure_xr_hidden,
-                                   est_volume_xr[..., self.shape//2, :],
-                                   est_figure_xr_locked,], dim=-2).transpose(2, 3)
+                        torch.cat([image2d,
+                                   image3d_prj, 
+                                   z3d
+                                   ], dim=-2).transpose(2, 3),
+                        torch.cat([image3d[..., self.shape//2, :],
+                                   image3d[..., :, self.shape//2],
+                                   image3d_rec[..., self.shape//2, :],
+                                   image3d_rec[..., :, self.shape//2],
+                                   image2d_rep[..., self.shape//2, :],
+                                   image2d_rep[..., :, self.shape//2],
+                                   ], dim=-2).transpose(2, 3)
                     ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
             tensorboard = self.logger.experiment
             tensorboard.add_image(f'{stage}_samples', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
+        
 
-        self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-        self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        # loss_bce = self.loss_bce(image3d, image3d_rec) \
+        #          + self.loss_bce(image3d_rep, image3d_prj) \
+        #          + self.loss_bce(image2d_rec, image2d) 
+        # beta = 100
+        # loss_kld = torch.mean(-0.5 * beta * torch.mean(1 + logvar3d - mu3d.pow(2) - logvar3d.exp(), dim=1), dim=0) \
+        #          + torch.mean(-0.5 * beta * torch.mean(1 + logvar2d - mu2d.pow(2) - logvar2d.exp(), dim=1), dim=0) \
+        #          + torch.mean(-0.5 * beta * torch.mean(1 + logvar2x - mu2x.pow(2) - logvar2x.exp(), dim=1), dim=0)
 
+        loss_bce = self.loss_bce(image3d, image3d_rec)
+        beta = 100
+        loss_kld = torch.mean(-0.5 * beta * torch.mean(1 + logvar3d - mu3d.pow(2) - logvar3d.exp(), dim=1), dim=0) 
+        loss_sl1 = self.loss_sl1(mu3d, mu2d.view(mu3d.shape)) + self.loss_sl1(logvar3d, logvar2d.view(logvar3d.shape))
+        loss = loss_bce + loss_kld + 3*loss_sl1
+        # loss = self.loss_sl1(z3d, image2d.view(z3d.shape))
         info = {f'loss': loss}
         return info
 
@@ -270,7 +250,7 @@ if __name__ == "__main__":
             lr_callback,
             checkpoint_callback,
         ],
-        accumulate_grad_batches=5,
+        # accumulate_grad_batches=5,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         strategy="fsdp",  # "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16,  # if hparams.use_amp else 32,
@@ -373,7 +353,7 @@ if __name__ == "__main__":
         val_samples=hparams.val_samples,
         test_samples=hparams.test_samples,
         batch_size=hparams.batch_size,
-        img_shape=hparams.shape,
+        img_shape=hparams.shape * 2,
         vol_shape=hparams.shape
     )
     datamodule.setup()
@@ -382,7 +362,7 @@ if __name__ == "__main__":
     # test_random_uniform_cameras(hparams, datamodule)
     #############################################
 
-    model = NeRVLightningModule(
+    model = IRVAELightningModule(
         hparams=hparams
     )
     model = model.load_from_checkpoint(hparams.ckpt, strict=False) if hparams.ckpt is not None else model

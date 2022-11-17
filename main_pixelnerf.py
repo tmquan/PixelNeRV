@@ -33,10 +33,11 @@ from typing import Optional, Sequence
 
 
 from datamodule import UnpairedDataModule
-from nerv.inverse_renderer import NeRVFrontToBackInverseRenderer
+from pixelnerf.encoder import build_spatial_encoder
+from pixelnerf.renderer import PixelNeRFRenderer
 from dvr.renderer import DirectVolumeFrontToBackRenderer
 
-class NeRVLightningModule(LightningModule):
+class PixelNeRFLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
         super().__init__()
         self.logsdir = hparams.logsdir
@@ -57,12 +58,42 @@ class NeRVLightningModule(LightningModule):
             max_depth=6.0
         )
 
-        self.inv_renderer = NeRVFrontToBackInverseRenderer(
-            shape=self.shape, 
-            in_channels=1, 
-            # mid_channels=17, # Spherical Harmonics Level 3
-            mid_channels=10, # Spherical Harmonics Level 2
-            out_channels=1,
+        # To build the predictor
+        scene_encoder = build_spatial_encoder(
+            backbone="resnet34",
+            bn="SyncBN",
+            num_layers=4,
+            pretrained=True,
+            norm_type="batch",
+            use_first_pool=True,
+            index_interp="bilinear",
+            index_padding="border",
+            upsample_interp="bilinear",
+            feature_scale=1,
+        )
+
+        self.inv_renderer = PixelNeRFRenderer(
+            image_size=[self.shape, self.shape],
+            n_pts_per_ray=128,
+            n_pts_per_ray_fine=256,
+            n_rays_per_image=1024,
+            min_depth=2.0,
+            max_depth=6.0,
+            stratified=True,
+            stratified_test=False,
+            chunk_size_test=4096,
+            n_harmonic_functions_xyz=10,
+            n_harmonic_functions_dir=4,
+            n_hidden_neurons_xyz=256,
+            n_hidden_neurons_dir=128,
+            n_layers_xyz=8,
+            density_noise_std=0.0,
+            scene_encoder=scene_encoder,
+            transform_to_source_view=True,
+            use_image_feats=True,
+            resnetfc=True,
+            use_depth=False,
+            use_view_dirs=True,
         )
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
@@ -117,69 +148,54 @@ class NeRVLightningModule(LightningModule):
         # XR pathway
         src_figure_xr_hidden = image2d
 
-        figure_dx = torch.cat([src_figure_xr_hidden, est_figure_ct_locked, est_figure_ct_random])
+        out_ct_random, metrics_ct_random = self.inv_renderer.forward(
+            camera_hash=None, 
+            depth=None,
+            source_image=est_figure_ct_locked.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
+            source_camera=camera_locked, 
+            image=est_figure_ct_random.repeat(1, 3, 1, 1).permute(0, 2, 3, 1), 
+            camera=camera_random,
+        )
+
+        out_ct_locked, metrics_ct_locked = self.inv_renderer.forward(
+            camera_hash=None, 
+            depth=None,
+            source_image=est_figure_ct_random.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
+            source_camera=camera_random, 
+            image=est_figure_ct_locked.repeat(1, 3, 1, 1).permute(0, 2, 3, 1), 
+            camera=camera_locked,
+        )
+
+        out_xr_locked, metrics_xr_locked = self.inv_renderer.forward(
+            camera_hash=None, 
+            depth=None,
+            source_image=src_figure_xr_hidden.repeat(1, 3, 1, 1).permute(0, 2, 3, 1),
+            source_camera=camera_locked, 
+            image=src_figure_xr_hidden.repeat(1, 3, 1, 1).permute(0, 2, 3, 1), 
+            camera=camera_locked,
+        )
+
+        #TODO: Add Orthogonal Camera
+        im3d_loss = 0
+        im2d_loss = metrics_ct_random["mse_coarse"] + metrics_ct_random["mse_fine"] \
+                  + metrics_ct_locked["mse_coarse"] + metrics_ct_locked["mse_fine"] \
+                  + metrics_xr_locked["mse_coarse"] + metrics_xr_locked["mse_fine"] 
         
-        denses_dx, opaque_dx = self.forward(figure_dx) 
-        
-        est_denses_xr, est_denses_ct, est_denses_rn = torch.split(denses_dx, self.batch_size)
-        est_volume_xr = est_denses_xr.mean(dim=1, keepdim=True)
-        est_volume_ct = est_denses_ct.mean(dim=1, keepdim=True)
-        est_volume_rn = est_denses_rn.mean(dim=1, keepdim=True)
-
-        est_opaque_xr, est_opaque_ct, est_opaque_rn = torch.split(opaque_dx, self.batch_size)
-
-        est_figure_xr_locked = self.fwd_renderer.forward(
-            image3d=est_denses_xr, 
-            opacity=est_opaque_xr, 
-            cameras=camera_locked
-        )
-
-        rec_figure_ct_locked = self.fwd_renderer.forward(
-            image3d=est_denses_ct, 
-            opacity=est_opaque_ct, 
-            cameras=camera_locked
-        )
-        rec_figure_ct_random = self.fwd_renderer.forward(
-            image3d=est_denses_rn, 
-            opacity=est_opaque_rn, 
-            cameras=camera_random
-        )
-
-        rec_figure_ct_locked_ = self.fwd_renderer.forward(
-            image3d=est_denses_rn, 
-            opacity=est_opaque_ct, 
-            cameras=camera_locked
-        )
-        rec_figure_ct_random_ = self.fwd_renderer.forward(
-            image3d=est_denses_ct, 
-            opacity=est_opaque_rn, 
-            cameras=camera_random
-        )
-
-        # Compute the loss
-        im3d_loss = self.loss_smoothl1(src_volume_ct, est_volume_ct) \
-                  + self.loss_smoothl1(src_volume_ct, est_volume_rn) 
-                  
-        im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked) \
-                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random) \
-                  + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked_) \
-                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_) \
-                  + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked)
-
-        loss = im3d_loss + im2d_loss 
-
         if batch_idx == 0:
             viz2d = torch.cat([
-                        torch.cat([src_volume_ct[..., self.shape//2, :],
-                                   est_opaque_ct[..., self.shape//2, :],
-                                   est_figure_ct_random,
-                                   est_figure_ct_locked,
-                                   est_volume_ct[..., self.shape//2, :],], dim=-2).transpose(2, 3),
-                        torch.cat([rec_figure_ct_random,
-                                   rec_figure_ct_locked,
-                                   src_figure_xr_hidden,
-                                   est_volume_xr[..., self.shape//2, :],
-                                   est_figure_xr_locked,], dim=-2).transpose(2, 3)
+                        torch.cat([src_volume_ct[..., self.shape//2, :], 
+                                   est_figure_ct_locked, 
+                                   est_figure_ct_random, 
+                                   out_ct_random["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
+                                   out_ct_locked["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
+                                   src_figure_xr_hidden, 
+                                   out_xr_locked["rgb_fine"].permute(0,3,1,2).mean(dim=1, keepdim=True), 
+                                   ], dim=-2).transpose(2, 3),
+                        # torch.cat([rec_figure_ct_random,
+                        #            rec_figure_ct_locked,
+                        #            src_figure_xr_hidden,
+                        #            est_volume_xr[..., self.shape//2, :],
+                        #            est_figure_xr_locked,], dim=-2).transpose(2, 3)
                     ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
             tensorboard = self.logger.experiment
@@ -382,7 +398,7 @@ if __name__ == "__main__":
     # test_random_uniform_cameras(hparams, datamodule)
     #############################################
 
-    model = NeRVLightningModule(
+    model = PixelNeRFLightningModule(
         hparams=hparams
     )
     model = model.load_from_checkpoint(hparams.ckpt, strict=False) if hparams.ckpt is not None else model
