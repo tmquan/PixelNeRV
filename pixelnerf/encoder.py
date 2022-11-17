@@ -102,7 +102,7 @@ class ResNetEncoder(nn.Module):
         """
         images = maybe_permute(images)
         
-        assert images.max() <= 1.0 and images.min() >= 0.0
+        # assert images.max() <= 1.0 and images.min() >= 0.0
 
         # Apply image transform required for torchvision models
         images = self.normalize_transform(images)

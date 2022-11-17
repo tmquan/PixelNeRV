@@ -189,7 +189,7 @@ class PixelNeRFLightningModule(LightningModule):
         out_xr_locked, metrics_xr_locked = self.inv_renderer.forward(
             camera_hash=None, 
             depth=None,
-            source_image=out_xr_random["rgb_fine"].clamp(0.0, 1.0),
+            source_image=out_xr_random["rgb_fine"],
             source_camera=camera_random, 
             image=src_figure_xr_hidden.repeat(1,3,1,1).permute(0,2,3,1), 
             camera=camera_locked,
