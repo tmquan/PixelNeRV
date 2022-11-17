@@ -191,9 +191,9 @@ class PixelNeRFLightningModule(LightningModule):
             depth=None,
             source_image=out_xr_random["rgb_fine"].clamp(0.0, 1.0),
             source_camera=camera_random, 
-            image=None, 
+            image=src_figure_xr_hidden.repeat(1,3,1,1).permute(0,2,3,1), 
             camera=camera_locked,
-            fine_or_both="fine",
+            fine_or_both="both",
         )
 
         #TODO: Add Orthogonal Camera
@@ -201,8 +201,8 @@ class PixelNeRFLightningModule(LightningModule):
         im2d_loss = metrics_ct_random["mse_coarse"] + metrics_ct_random["mse_fine"] \
                   + metrics_ct_locked["mse_coarse"] + metrics_ct_locked["mse_fine"] \
                   + metrics_xr_hidden["mse_coarse"] + metrics_xr_hidden["mse_fine"] \
-                  + self.loss_smoothl1(out_xr_random["rgb_gt"],
-                                       out_xr_locked["rgb_fine"])
+                  + metrics_xr_locked["mse_coarse"] + metrics_xr_locked["mse_fine"] 
+                  
 
         if batch_idx == 0 and stage!='train':
             viz2d = torch.cat([
