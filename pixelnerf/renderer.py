@@ -2,7 +2,7 @@ from .raysampler import SphereRaysampler, PixelNeRFRaysampler
 from .implicit_function import PixelNeRF
 from nerf.utils import calc_mse, calc_psnr, sample_images_at_mc_locs
 from nerf.raysampler import NeRFRaysampler, ProbabilisticRaysampler
-from nerf.raymarcher import EmissionAbsorptionNeRFRaymarcherFrontToBack
+from nerf.raymarcher import EmissionAbsorptionNeRFFrontToBackRaymarcher
 from nerf.renderer import NeRFRenderer
 
 from pytorch3d.renderer import RayBundle, ray_bundle_to_ray_points
@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 
 
-class PixelNeRFRenderer(NeRFRenderer):
+class PixelNeRFFrontToBackRenderer(NeRFRenderer):
     """
     Implements a renderer of a Neural Radiance Field.
 
@@ -147,7 +147,7 @@ class PixelNeRFRenderer(NeRFRenderer):
         self._implicit_function = torch.nn.ModuleDict()
 
         # Init the EA raymarcher used by both passes.
-        raymarcher = EmissionAbsorptionNeRFRaymarcherFrontToBack()
+        raymarcher = EmissionAbsorptionNeRFFrontToBackRaymarcher()
 
         # Parse out image dimensions.
         image_height, image_width = image_size

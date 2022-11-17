@@ -67,7 +67,7 @@ class EmissionAbsorptionNeRFRaymarcher(EmissionAbsorptionRaymarcher):
         return features, weights
 
 
-class EmissionAbsorptionNeRFRaymarcherFrontToBack(EmissionAbsorptionRaymarcher):
+class EmissionAbsorptionNeRFFrontToBackRaymarcher(EmissionAbsorptionRaymarcher):
     """
     This is essentially the `pytorch3d.renderer.EmissionAbsorptionRaymarcher`
     which additionally returns the rendering weights. It also skips returning

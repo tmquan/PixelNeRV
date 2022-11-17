@@ -34,7 +34,7 @@ from typing import Optional, Sequence
 
 from datamodule import UnpairedDataModule
 from pixelnerf.encoder import build_spatial_encoder
-from pixelnerf.renderer import PixelNeRFRenderer
+from pixelnerf.renderer import PixelNeRFFrontToBackRenderer
 from dvr.renderer import DirectVolumeFrontToBackRenderer
 
 class PixelNeRFLightningModule(LightningModule):
@@ -72,7 +72,7 @@ class PixelNeRFLightningModule(LightningModule):
             feature_scale=1,
         )
 
-        self.inv_renderer = PixelNeRFRenderer(
+        self.inv_renderer = PixelNeRFFrontToBackRenderer(
             image_size=(self.shape, self.shape),
             n_pts_per_ray=256,
             n_pts_per_ray_fine=512,
