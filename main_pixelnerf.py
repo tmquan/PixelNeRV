@@ -193,7 +193,6 @@ class PixelNeRFLightningModule(LightningModule):
             source_camera=camera_random, 
             image=src_figure_xr_hidden.repeat(1,3,1,1).permute(0,2,3,1), 
             camera=camera_locked,
-            fine_or_both="both",
         )
 
         #TODO: Add Orthogonal Camera
