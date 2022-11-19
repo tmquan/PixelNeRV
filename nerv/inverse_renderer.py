@@ -9,7 +9,6 @@ from pytorch3d.structures import Volumes
 
 from .rsh import rsh_cart_2, rsh_cart_3
 
-
 class NeRVFrontToBackInverseRenderer(nn.Module):
     def __init__(self, shape=256, in_channels=1, mid_channels=10, out_channels=1):
         super().__init__()
@@ -29,7 +28,7 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.5,
+                dropout=0.5,
             ),
             Reshape(*[1, shape, shape, shape]),
         )
@@ -46,7 +45,7 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.5,
+                dropout=0.5,
             ),
         )
 
@@ -62,7 +61,7 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.5,
+                dropout=0.5,
             ),
         )
 
