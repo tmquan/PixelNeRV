@@ -61,8 +61,8 @@ class NeRVLightningModule(LightningModule):
         self.inv_renderer = NeRVFrontToBackInverseRenderer(
             shape=self.shape, 
             in_channels=1, 
-            # mid_channels=17, # Spherical Harmonics Level 3
-            mid_channels=10, # Spherical Harmonics Level 2
+            mid_channels=17, # Spherical Harmonics Level 3
+            # mid_channels=10, # Spherical Harmonics Level 2
             out_channels=1,
         )
 
