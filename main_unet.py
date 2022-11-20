@@ -105,8 +105,6 @@ class UnetLightningModule(LightningModule):
         R_random, T_random = look_at_view_transform(dist=dist_random, elev=elev_random, azim=azim_random)
         camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
 
-        
-
         # CT pathway
         src_volume_ct = image3d
         src_opaque_ct = torch.ones_like(src_volume_ct)
@@ -128,8 +126,8 @@ class UnetLightningModule(LightningModule):
         elev_dx = torch.cat([elev_locked, elev_locked, elev_random])
         azim_dx = torch.cat([azim_locked, azim_locked, azim_random])
         denses_dx, opaque_dx = self.forward(figure_dx, elevation=elev_dx, azimuth=azim_dx) 
-        
         est_denses_xr, est_denses_ct, est_denses_rn = torch.split(denses_dx, self.batch_size)
+
         est_volume_xr = est_denses_xr.mean(dim=1, keepdim=True)
         est_volume_ct = est_denses_ct.mean(dim=1, keepdim=True)
         est_volume_rn = est_denses_rn.mean(dim=1, keepdim=True)
@@ -148,18 +146,18 @@ class UnetLightningModule(LightningModule):
             cameras=camera_locked
         )
         rec_figure_ct_random = self.fwd_renderer.forward(
-            image3d=est_denses_rn, 
-            opacity=est_opaque_rn, 
+            image3d=est_denses_ct, 
+            opacity=est_opaque_ct, 
             cameras=camera_random
         )
 
-        rec_figure_ct_locked_ = self.fwd_renderer.forward(
+        rec_figure_rn_locked = self.fwd_renderer.forward(
             image3d=est_denses_rn, 
-            opacity=est_opaque_ct, 
+            opacity=est_opaque_rn, 
             cameras=camera_locked
         )
-        rec_figure_ct_random_ = self.fwd_renderer.forward(
-            image3d=est_denses_ct, 
+        rec_figure_rn_random = self.fwd_renderer.forward(
+            image3d=est_denses_rn, 
             opacity=est_opaque_rn, 
             cameras=camera_random
         )
@@ -168,11 +166,11 @@ class UnetLightningModule(LightningModule):
         im3d_loss = self.loss_smoothl1(src_volume_ct, est_volume_ct) \
                   + self.loss_smoothl1(src_volume_ct, est_volume_rn) 
                   
-        im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked) \
+        im2d_loss = self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked) \
+                  + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked) \
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random) \
-                  + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked_) \
-                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_) \
-                  + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked)
+                  + self.loss_smoothl1(est_figure_ct_locked, rec_figure_rn_locked) \
+                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_rn_random) 
 
         loss = im3d_loss + im2d_loss 
 
