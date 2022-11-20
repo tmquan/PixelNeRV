@@ -127,17 +127,18 @@ class UnetLightningModule(LightningModule):
             ], dim=1)
         )
         # Replace the CT
-        random_dx = torch.cat([forward_dx[:,[0]], est_figure_ct_random]) 
+        # Split the tensors
+        est_figure_xr_random, rec_figure_ct_random = torch.split(forward_dx, self.batch_size)
+        random_dx = torch.cat([est_figure_xr_random, est_figure_ct_random]) 
         reverse_dx = self.inv_renderer(
             torch.cat([
                 random_dx,
-                elev_random.view(-1,1,1,1).repeat(2,1,self.shape,self.shape),
-                azim_random.view(-1,1,1,1).repeat(2,1,self.shape,self.shape),
+                -elev_random.view(-1,1,1,1).repeat(2,1,self.shape,self.shape),
+                -azim_random.view(-1,1,1,1).repeat(2,1,self.shape,self.shape),
             ], dim=1)
         )
 
         # Split the tensors
-        est_figure_xr_random, rec_figure_ct_random = torch.split(forward_dx, self.batch_size)
         est_figure_xr_locked, rec_figure_ct_locked = torch.split(reverse_dx, self.batch_size)
 
         # Compute the loss
