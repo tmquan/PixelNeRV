@@ -9,7 +9,7 @@ from pytorch3d.structures import Volumes
 
 from .rsh import rsh_cart_2, rsh_cart_3
 
-class NeRVFrontToBackInverseRenderer(nn.Module):
+class UnetFrontToBackInverseRenderer(nn.Module):
     def __init__(self, shape=256, in_channels=1, mid_channels=10, out_channels=1):
         super().__init__()
         self.shape = shape

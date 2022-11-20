@@ -33,11 +33,11 @@ from typing import Optional, Sequence
 
 
 from datamodule import UnpairedDataModule
-from nerv.inverse_renderer import NeRVFrontToBackInverseRenderer
+from unet.inverse_renderer import UnetFrontToBackInverseRenderer
 from dvr.renderer import DirectVolumeFrontToBackRenderer
 
 
-class NeRVLightningModule(LightningModule):
+class UnetLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
         super().__init__()
         self.logsdir = hparams.logsdir
@@ -58,7 +58,7 @@ class NeRVLightningModule(LightningModule):
             max_depth=6.0
         )
 
-        self.inv_renderer = NeRVFrontToBackInverseRenderer(
+        self.inv_renderer = UnetFrontToBackInverseRenderer(
             shape=self.shape, 
             in_channels=1, 
             mid_channels=17, # Spherical Harmonics Level 3
@@ -204,7 +204,7 @@ class NeRVLightningModule(LightningModule):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--conda_env", type=str, default="NeRV")
+    parser.add_argument("--conda_env", type=str, default="Unet")
     parser.add_argument("--notification_email", type=str, default="quantm88@gmail.com")
 
     # Model arguments
@@ -364,7 +364,7 @@ if __name__ == "__main__":
     # test_random_uniform_cameras(hparams, datamodule)
     #############################################
 
-    model = NeRVLightningModule(
+    model = UnetLightningModule(
         hparams=hparams
     )
     model = model.load_from_checkpoint(hparams.ckpt, strict=False) if hparams.ckpt is not None else model
