@@ -53,7 +53,7 @@ class UnetLightningModule(LightningModule):
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
             image_height=self.shape, 
-            n_pts_per_ray=256, 
+            n_pts_per_ray=400, 
             min_depth=2.0, 
             max_depth=6.0
         )
@@ -276,7 +276,7 @@ if __name__ == "__main__":
             lr_callback,
             checkpoint_callback,
         ],
-        accumulate_grad_batches=5,
+        # accumulate_grad_batches=5,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         strategy="fsdp",  # "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16,  # if hparams.use_amp else 32,
