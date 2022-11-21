@@ -139,8 +139,7 @@ class UnetLightningModule(LightningModule):
         rec_denses_xr, rec_opaque_xr = self.forward(est_figure_xr_random)
         
         rec_figure_xr_locked = self.fwd_renderer.forward(image3d=rec_denses_xr, opacity=rec_opaque_xr, cameras=camera_locked)
-        rec_figure_xr_random = self.fwd_renderer.forward(image3d=rec_denses_xr, opacity=rec_opaque_xr, cameras=camera_random)
-
+        
         rec_figure_ct_locked = self.fwd_renderer.forward(image3d=est_denses_ct, opacity=est_opaque_ct, cameras=camera_locked)
         rec_figure_ct_random = self.fwd_renderer.forward(image3d=est_denses_ct, opacity=est_opaque_ct, cameras=camera_random)
 
@@ -153,7 +152,6 @@ class UnetLightningModule(LightningModule):
                   
         im2d_loss = self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked) \
                   + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_locked) \
-                  + self.loss_smoothl1(est_figure_xr_random, rec_figure_xr_random) \
                   + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked) \
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random) \
                   + self.loss_smoothl1(est_figure_ct_locked, rec_figure_rn_locked) \
