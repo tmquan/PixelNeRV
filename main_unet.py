@@ -125,52 +125,35 @@ class UnetLightningModule(LightningModule):
         # XR pathway
         src_figure_xr_hidden = image2d
 
-        figure_dx = torch.cat([src_figure_xr_hidden, est_figure_ct_locked, est_figure_ct_random])
-        # elev_dx = torch.cat([elev_locked, elev_locked, elev_random])
-        # azim_dx = torch.cat([azim_locked, azim_locked, azim_random])
-        # denses_dx, opaque_dx = self.forward(figure_dx, elevation=elev_dx, azimuth=azim_dx) 
-        denses_dx, opaque_dx = self.forward(figure_dx) 
-        est_denses_xr, est_denses_ct, est_denses_rn = torch.split(denses_dx, self.batch_size)
+        est_denses_xr, est_opaque_xr = self.forward(src_figure_xr_hidden)
+        est_denses_ct, est_opaque_ct = self.forward(est_figure_ct_locked)
+        est_denses_rn, est_opaque_rn = self.forward(est_figure_ct_random)
 
         est_volume_xr = est_denses_xr.mean(dim=1, keepdim=True)
         est_volume_ct = est_denses_ct.mean(dim=1, keepdim=True)
         est_volume_rn = est_denses_rn.mean(dim=1, keepdim=True)
+        
+        est_figure_xr_locked = self.fwd_renderer.forward(image3d=est_denses_xr, opacity=est_opaque_xr, cameras=camera_locked)
+        est_figure_xr_random = self.fwd_renderer.forward(image3d=est_denses_xr, opacity=est_opaque_xr, cameras=camera_random)
+        
+        rec_denses_xr, rec_opaque_xr = self.forward(est_figure_xr_random)
+        
+        rec_figure_xr_locked = self.fwd_renderer.forward(image3d=rec_denses_xr, opacity=rec_opaque_xr, cameras=camera_locked)
+        rec_figure_xr_random = self.fwd_renderer.forward(image3d=rec_denses_xr, opacity=rec_opaque_xr, cameras=camera_random)
 
-        est_opaque_xr, est_opaque_ct, est_opaque_rn = torch.split(opaque_dx, self.batch_size)
+        rec_figure_ct_locked = self.fwd_renderer.forward(image3d=est_denses_ct, opacity=est_opaque_ct, cameras=camera_locked)
+        rec_figure_ct_random = self.fwd_renderer.forward(image3d=est_denses_ct, opacity=est_opaque_ct, cameras=camera_random)
 
-        est_figure_xr_locked = self.fwd_renderer.forward(
-            image3d=est_denses_xr, 
-            opacity=est_opaque_xr, 
-            cameras=camera_locked
-        )
-
-        rec_figure_ct_locked = self.fwd_renderer.forward(
-            image3d=est_denses_ct, 
-            opacity=est_opaque_ct, 
-            cameras=camera_locked
-        )
-        rec_figure_ct_random = self.fwd_renderer.forward(
-            image3d=est_denses_ct, 
-            opacity=est_opaque_ct, 
-            cameras=camera_random
-        )
-
-        rec_figure_rn_locked = self.fwd_renderer.forward(
-            image3d=est_denses_rn, 
-            opacity=est_opaque_rn, 
-            cameras=camera_locked
-        )
-        rec_figure_rn_random = self.fwd_renderer.forward(
-            image3d=est_denses_rn, 
-            opacity=est_opaque_rn, 
-            cameras=camera_random
-        )
+        rec_figure_rn_locked = self.fwd_renderer.forward(image3d=est_denses_rn, opacity=est_opaque_rn, cameras=camera_locked)
+        rec_figure_rn_random = self.fwd_renderer.forward(image3d=est_denses_rn, opacity=est_opaque_rn, cameras=camera_random)
 
         # Compute the loss
         im3d_loss = self.loss_smoothl1(src_volume_ct, est_volume_ct) \
                   + self.loss_smoothl1(src_volume_ct, est_volume_rn) 
                   
         im2d_loss = self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked) \
+                  + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_locked) \
+                  + self.loss_smoothl1(est_figure_xr_random, rec_figure_xr_random) \
                   + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked) \
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random) \
                   + self.loss_smoothl1(est_figure_ct_locked, rec_figure_rn_locked) \
