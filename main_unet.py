@@ -60,7 +60,7 @@ class UnetLightningModule(LightningModule):
 
         self.inv_renderer = UnetFrontToBackInverseRenderer(
             shape=self.shape, 
-            in_channels=3, 
+            in_channels=1, 
             # mid_channels=17, # Spherical Harmonics Level 3
             mid_channels=10, # Spherical Harmonics Level 2
             out_channels=1,
@@ -68,15 +68,18 @@ class UnetLightningModule(LightningModule):
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
         
-    def forward(self, figures, elevation, azimuth):
+    # def forward(self, figures, elevation, azimuth):
+    #     return self.inv_renderer(
+    #         torch.cat([
+    #             figures, 
+    #             elevation.view(-1,1,1,1).repeat(1,1,self.shape,self.shape),
+    #             azimuth.view(-1,1,1,1).repeat(1,1,self.shape,self.shape),
+    #         ], dim=1)
+    #     )    
+    def forward(self, figures):
         return self.inv_renderer(
-            torch.cat([
-                figures, 
-                elevation.view(-1,1,1,1).repeat(1,1,self.shape,self.shape),
-                azimuth.view(-1,1,1,1).repeat(1,1,self.shape,self.shape),
-            ], dim=1)
-        )    
-
+            figures
+        ) 
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -123,9 +126,10 @@ class UnetLightningModule(LightningModule):
         src_figure_xr_hidden = image2d
 
         figure_dx = torch.cat([src_figure_xr_hidden, est_figure_ct_locked, est_figure_ct_random])
-        elev_dx = torch.cat([elev_locked, elev_locked, elev_random])
-        azim_dx = torch.cat([azim_locked, azim_locked, azim_random])
-        denses_dx, opaque_dx = self.forward(figure_dx, elevation=elev_dx, azimuth=azim_dx) 
+        # elev_dx = torch.cat([elev_locked, elev_locked, elev_random])
+        # azim_dx = torch.cat([azim_locked, azim_locked, azim_random])
+        # denses_dx, opaque_dx = self.forward(figure_dx, elevation=elev_dx, azimuth=azim_dx) 
+        denses_dx, opaque_dx = self.forward(figure_dx) 
         est_denses_xr, est_denses_ct, est_denses_rn = torch.split(denses_dx, self.batch_size)
 
         est_volume_xr = est_denses_xr.mean(dim=1, keepdim=True)
