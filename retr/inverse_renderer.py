@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from monai.networks.layers import Norm, Reshape
-from monai.networks.nets import SwinUNETR
+from monai.networks.nets import FlexibleUNet
 
 from pytorch3d.renderer import NDCMultinomialRaysampler, VolumeRenderer
 from pytorch3d.structures import Volumes
@@ -17,36 +17,39 @@ class RetrFrontToBackInverseRenderer(nn.Module):
         self.mid_channels = mid_channels
         self.out_channels = out_channels
         self.clarity_net = nn.Sequential(
-            SwinUNETR(
-                img_size=(self.shape, self.shape),
+            FlexibleUNet(
                 spatial_dims=2,
-                in_channels=3,
-                out_channels=self.shape,
-                feature_size=48,
-                use_checkpoint=True,
+                in_channels=self.in_channels,
+                out_channels=shape,
+                act=("LeakyReLU", {"inplace": True}),
+                norm=Norm.BATCH,
+                # upsample="pixelshuffle",
+                backbone="efficientnet-b0"
             ),
             Reshape(*[1, shape, shape, shape]),
         )
 
         self.density_net = nn.Sequential(
-            SwinUNETR(
-                img_size=(self.shape, self.shape, self.shape),
+            FlexibleUNet(
                 spatial_dims=3,
                 in_channels=1,
                 out_channels=1,
-                feature_size=48,
-                use_checkpoint=True,
+                act=("LeakyReLU", {"inplace": True}),
+                norm=Norm.BATCH,
+                # upsample="pixelshuffle",
+                backbone="efficientnet-b0"
             )
         )
 
         self.mixture_net = nn.Sequential(
-            SwinUNETR(
-                img_size=(self.shape, self.shape, self.shape),
+            FlexibleUNet(
                 spatial_dims=3,
                 in_channels=2,
                 out_channels=self.mid_channels,
-                feature_size=48,
-                use_checkpoint=True,
+                act=("LeakyReLU", {"inplace": True}),
+                norm=Norm.BATCH,
+                # upsample="pixelshuffle",
+                backbone="efficientnet-b0"
             )
         )
 

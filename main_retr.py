@@ -58,7 +58,9 @@ class UnetLightningModule(LightningModule):
             max_depth=6.0
         )
 
-        self.inv_renderer = RetrFrontToBackInverseRenderer()
+        self.inv_renderer = RetrFrontToBackInverseRenderer(
+            in_channels=3
+        )
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
         
@@ -119,35 +121,39 @@ class UnetLightningModule(LightningModule):
         figure_dx = torch.cat([src_figure_xr_hidden, est_figure_ct_locked, est_figure_ct_random])
         elev_dx = torch.cat([elev_locked, elev_locked, elev_random])
         azim_dx = torch.cat([azim_locked, azim_locked, azim_random])
-        volume_dx, opaque_dx = self.forward(figure_dx, elevation=elev_dx, azimuth=azim_dx) 
-        est_volume_xr, est_volume_ct, est_volume_rn = torch.split(volume_dx, self.batch_size)
+        denses_dx, opaque_dx = self.forward(figure_dx, elevation=elev_dx, azimuth=azim_dx) 
+        est_denses_xr, est_denses_ct, est_denses_rn = torch.split(denses_dx, self.batch_size)
+
+        est_volume_xr = est_denses_xr.mean(dim=1, keepdim=True)
+        est_volume_ct = est_denses_ct.mean(dim=1, keepdim=True)
+        est_volume_rn = est_denses_rn.mean(dim=1, keepdim=True)
 
         est_opaque_xr, est_opaque_ct, est_opaque_rn = torch.split(opaque_dx, self.batch_size)
 
         est_figure_xr_locked = self.fwd_renderer.forward(
-            image3d=est_volume_xr, 
+            image3d=est_denses_xr, 
             opacity=est_opaque_xr, 
             cameras=camera_locked
         )
 
         rec_figure_ct_locked = self.fwd_renderer.forward(
-            image3d=est_volume_ct, 
+            image3d=est_denses_ct, 
             opacity=est_opaque_ct, 
             cameras=camera_locked
         )
         rec_figure_ct_random = self.fwd_renderer.forward(
-            image3d=est_volume_ct, 
+            image3d=est_denses_ct, 
             opacity=est_opaque_ct, 
             cameras=camera_random
         )
 
         rec_figure_rn_locked = self.fwd_renderer.forward(
-            image3d=est_volume_rn, 
+            image3d=est_denses_rn, 
             opacity=est_opaque_rn, 
             cameras=camera_locked
         )
         rec_figure_rn_random = self.fwd_renderer.forward(
-            image3d=est_volume_rn, 
+            image3d=est_denses_rn, 
             opacity=est_opaque_rn, 
             cameras=camera_random
         )
@@ -186,7 +192,7 @@ class UnetLightningModule(LightningModule):
 
         info = {f'loss': loss}
         return info
-
+        
     def training_step(self, batch, batch_idx):
         return self._common_step(batch, batch_idx, optimizer_idx=0, stage='train')
 
