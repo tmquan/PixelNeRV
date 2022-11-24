@@ -68,8 +68,8 @@ class UnetFrontToBackInverseRenderer(nn.Module):
 
         if self.with_stn:
             self.affine_theta = EfficientNetBN("efficientnet-b8", 
-                spatial_dims=3, 
-                in_channels=2, 
+                spatial_dims=2, 
+                in_channels=1, 
                 num_classes=3*4,
                 pretrained=True
             )
@@ -103,7 +103,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
         
         #Call the spatial transformer network to correct the pose
         if self.with_stn:
-            theta = self.affine_theta(volumes_opacits).view(figures.shape[0], 3, 4).float()
+            theta = self.affine_theta(figures).view(figures.shape[0], 3, 4).float()
             volumes_opacits = self.affine_tform(volumes_opacits, theta)
         
         volumes,opacits = torch.split(volumes_opacits, [self.mid_channels-1, 1], dim=1)
