@@ -151,7 +151,8 @@ class UnetLightningModule(LightningModule):
 
         # Compute the loss
         im3d_loss = self.loss_smoothl1(src_volume_ct, est_volume_ct) \
-                  + self.loss_smoothl1(src_volume_ct, est_volume_rn) 
+                  + self.loss_smoothl1(src_volume_ct, est_volume_rn) \
+                  + self.loss_smoothl1(est_volume_xr, rec_volume_xr) 
                   
         # im2d_loss = self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked) \
         #           + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_locked) \
