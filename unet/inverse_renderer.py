@@ -6,7 +6,7 @@ from monai.networks.nets import Unet, EfficientNetBN
 from monai.networks.nets.flexible_unet import encoder_feature_channel
 # from pytorch3d.renderer import NDCMultinomialRaysampler, VolumeRenderer
 # from pytorch3d.structures import Volumes
-
+from kornia.geometry.transform.imgwarp import warp_affine3d
 # from .rsh import rsh_cart_2, rsh_cart_3
 
 class UnetFrontToBackInverseRenderer(nn.Module):
@@ -74,7 +74,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 pretrained=True
             )
             self.affine_tform = AffineTransform(
-                normalized=True
+                normalized=False
             )
 
         # # Generate grid
@@ -107,6 +107,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
         if self.with_stn:
             theta = self.affine_theta(figures).view(figures.shape[0], 3, 4).float()
             volumes_opacits = self.affine_tform(volumes_opacits, theta)
+            # volumes_opacits = warp_affine3d(volumes_opacits, theta, dsize=[self.shape]*3)
         
         volumes,opacits = torch.split(volumes_opacits, [self.mid_channels-1, 1], dim=1)
         return volumes, F.softplus(opacits)
