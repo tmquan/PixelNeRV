@@ -64,7 +64,8 @@ class UnetLightningModule(LightningModule):
             # mid_channels=17, # Spherical Harmonics Level 3
             # mid_channels=10, # Spherical Harmonics Level 2
             mid_channels=2, # Spherical Harmonics Level 2
-            out_channels=1,
+            out_channels=1, 
+            with_stn=True,
         )
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)

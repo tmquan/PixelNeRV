@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from monai.networks.layers import Norm, Reshape
-from monai.networks.nets import Unet
+from monai.networks.layers import Norm, Reshape, AffineTransform
+from monai.networks.nets import Unet, EfficientNetBN
 from monai.networks.nets.flexible_unet import encoder_feature_channel
 # from pytorch3d.renderer import NDCMultinomialRaysampler, VolumeRenderer
 # from pytorch3d.structures import Volumes
@@ -10,12 +10,13 @@ from monai.networks.nets.flexible_unet import encoder_feature_channel
 # from .rsh import rsh_cart_2, rsh_cart_3
 
 class UnetFrontToBackInverseRenderer(nn.Module):
-    def __init__(self, shape=256, in_channels=1, mid_channels=10, out_channels=1):
+    def __init__(self, shape=256, in_channels=1, mid_channels=10, out_channels=1, with_stn=True):
         super().__init__()
         self.shape = shape
         self.in_channels = in_channels
         self.mid_channels = mid_channels
         self.out_channels = out_channels
+        self.with_stn = with_stn
         self.clarity_net = nn.Sequential(
             Unet(
                 spatial_dims=2,
@@ -65,6 +66,15 @@ class UnetFrontToBackInverseRenderer(nn.Module):
             ),
         )
 
+        if self.with_stn:
+            self.affine_theta = EfficientNetBN("efficientnet-b8", 
+                spatial_dims=2, 
+                in_channels=1, 
+                num_classes=3*4,
+                pretrained=True
+            )
+            self.affine_tform = AffineTransform()
+
         # # Generate grid
         # zs = torch.linspace(-1, 1, steps=self.shape)
         # ys = torch.linspace(-1, 1, steps=self.shape)
@@ -90,6 +100,12 @@ class UnetFrontToBackInverseRenderer(nn.Module):
         clarity = self.clarity_net(figures)
         density = self.density_net(clarity)
         volumes_opacits = self.mixture_net(torch.cat([clarity, density], dim=1))
+        
+        #Call the spatial transformer network to correct the pose
+        if self.with_stn:
+            theta = self.affine_theta(figures).view(figures.shape[0], 3, 4).float()
+            volumes_opacits = self.affine_tform(volumes_opacits, theta)
+        
         volumes,opacits = torch.split(volumes_opacits, [self.mid_channels-1, 1], dim=1)
         return volumes, F.softplus(opacits)
         # shcodes_opacits = self.mixture_net(torch.cat([clarity, density], dim=1))
