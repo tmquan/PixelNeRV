@@ -53,7 +53,7 @@ class UnetLightningModule(LightningModule):
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
             image_height=self.shape, 
-            n_pts_per_ray=400, 
+            n_pts_per_ray=512, 
             min_depth=2.0, 
             max_depth=6.0
         )
