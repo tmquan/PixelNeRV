@@ -3,11 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from monai.networks.layers import Norm, Reshape
 from monai.networks.nets import Unet
+from monai.networks.nets.flexible_unet import encoder_feature_channel
+# from pytorch3d.renderer import NDCMultinomialRaysampler, VolumeRenderer
+# from pytorch3d.structures import Volumes
 
-from pytorch3d.renderer import NDCMultinomialRaysampler, VolumeRenderer
-from pytorch3d.structures import Volumes
-
-from .rsh import rsh_cart_2, rsh_cart_3
+# from .rsh import rsh_cart_2, rsh_cart_3
 
 class UnetFrontToBackInverseRenderer(nn.Module):
     def __init__(self, shape=256, in_channels=1, mid_channels=10, out_channels=1):
@@ -21,7 +21,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=2,
                 in_channels=self.in_channels,
                 out_channels=shape,
-                channels=(32, 56, 88, 248, 704),
+                channels=encoder_feature_channel["efficientnet-b8"],
                 strides=(2, 2, 2, 2),
                 num_res_units=4,
                 kernel_size=3,
@@ -38,7 +38,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=1,
                 out_channels=1,
-                channels=(32, 56, 88, 248, 704),
+                channels=encoder_feature_channel["efficientnet-b8"],
                 strides=(2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -54,7 +54,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=2,
                 out_channels=self.mid_channels,
-                channels=(32, 56, 88, 248, 704),
+                channels=encoder_feature_channel["efficientnet-b8"],
                 strides=(2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
