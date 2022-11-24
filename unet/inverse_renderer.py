@@ -81,11 +81,11 @@ class UnetFrontToBackInverseRenderer(nn.Module):
             )
 
         
-    def forward(self, figures):
+    def forward(self, figures, hidden_or_random=True):
         clarity = self.clarity_net(figures)
         volumes_opacits = self.density_net(clarity)
         #Call the spatial transformer network to correct the pose
-        if self.with_stn:
+        if self.with_stn and hidden_or_random:
             theta = self.affine_theta(figures).view(figures.shape[0], 3, 4).float()
             # theta = torch.cat([
             #     theta, 

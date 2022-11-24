@@ -78,10 +78,8 @@ class UnetLightningModule(LightningModule):
     #             azimuth.view(-1,1,1,1).repeat(1,1,self.shape,self.shape),
     #         ], dim=1)
     #     )    
-    def forward(self, figures):
-        return self.inv_renderer(
-            figures
-        ) 
+    def forward(self, figures, hidden_or_random=True):
+        return self.inv_renderer(figures, hidden_or_random) 
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -127,9 +125,9 @@ class UnetLightningModule(LightningModule):
         # XR pathway
         src_figure_xr_hidden = image2d
 
-        est_volume_xr, est_opaque_xr = self.forward(src_figure_xr_hidden)
-        est_volume_ct, est_opaque_ct = self.forward(est_figure_ct_locked)
-        est_volume_rn, est_opaque_rn = self.forward(est_figure_ct_random)
+        est_volume_xr, est_opaque_xr = self.forward(src_figure_xr_hidden, hidden_or_random=True)
+        est_volume_ct, est_opaque_ct = self.forward(est_figure_ct_locked, hidden_or_random=False)
+        est_volume_rn, est_opaque_rn = self.forward(est_figure_ct_random, hidden_or_random=True)
 
         # est_volume_xr = est_denses_xr.mean(dim=1, keepdim=True)
         # est_volume_ct = est_denses_ct.mean(dim=1, keepdim=True)
@@ -138,7 +136,7 @@ class UnetLightningModule(LightningModule):
         est_figure_xr_locked = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=est_opaque_xr, cameras=camera_locked)
         est_figure_xr_random = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=est_opaque_xr, cameras=camera_random)
         
-        rec_volume_xr, rec_opaque_xr = self.forward(est_figure_xr_random)
+        rec_volume_xr, rec_opaque_xr = self.forward(est_figure_xr_random, hidden_or_random=True)
         
         rec_figure_xr_locked = self.fwd_renderer.forward(image3d=rec_volume_xr, opacity=rec_opaque_xr, cameras=camera_locked)
         rec_figure_xr_random = self.fwd_renderer.forward(image3d=rec_volume_xr, opacity=rec_opaque_xr, cameras=camera_random)
