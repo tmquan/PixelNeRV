@@ -17,6 +17,9 @@ from pytorch3d.renderer import (
     NDCMultinomialRaysampler, 
 )
 
+from pytorch3d.renderer.implicit import (
+    HarmonicEmbedding
+)
 from pytorch3d.renderer.cameras import (
     CamerasBase,
     FoVPerspectiveCameras, 
@@ -48,6 +51,13 @@ class UnetLightningModule(LightningModule):
         self.weight_decay = hparams.weight_decay
         self.batch_size = hparams.batch_size
         self.devices = hparams.devices
+
+        self.n_harmonic_functions_xyz = hparams.n_harmonic_functions_xyz
+        self.harmonic_embedding_xyz = HarmonicEmbedding(self.n_harmonic_functions_xyz, append_input=True)
+        
+        self.n_harmonic_functions_dir = hparams.n_harmonic_functions_dir
+        self.harmonic_embedding_dir = HarmonicEmbedding(self.n_harmonic_functions_dir, append_input=True)
+
         self.save_hyperparameters()
 
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
@@ -57,10 +67,14 @@ class UnetLightningModule(LightningModule):
             min_depth=2.0, 
             max_depth=6.0
         )
-
+        
+        if self.n_harmonic_functions_xyz==0 and self.n_harmonic_functions_dir==0:
+            in_channels = 1 + 3 + 3
+        else:
+            in_channels = 1 + self.harmonic_embedding_xyz.get_output_dim() + self.harmonic_embedding_dir.get_output_dim()
         self.inv_renderer = UnetFrontToBackInverseRenderer(
             shape=self.shape, 
-            in_channels=7, 
+            in_channels=in_channels, 
             # mid_channels=17, # Spherical Harmonics Level 3
             # mid_channels=10, # Spherical Harmonics Level 2
             # mid_channels=2, # Spherical Harmonics Level 2
@@ -69,8 +83,23 @@ class UnetLightningModule(LightningModule):
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
          
-    def forward(self, figures):
-        return self.inv_renderer(figures) 
+    def forward(self, figures, bundle):
+        B, C, H, W = figures.shape
+        assert B==bundle.origins.shape[0] and B==bundle.directions.shape[0]
+        if self.n_harmonic_functions_xyz > 0:
+            bundle_xyz = self.harmonic_embedding_xyz(bundle.origins.view(-1, 3))
+            bundle_xyz = bundle_xyz.view(B, H, W, -1).permute(0, 3, 1, 2)
+        else:
+            bundle_xyz = bundle.origins.permute(0, 3, 1, 2)
+
+        if self.n_harmonic_functions_dir > 0:
+            bundle_dir = self.harmonic_embedding_dir(bundle.directions.view(-1, 3))
+            bundle_dir = bundle_dir.view(B, H, W, -1).permute(0, 3, 1, 2)
+        else:
+            bundle_dir = bundle.directions.permute(0, 3, 1, 2)
+        
+        return self.inv_renderer(torch.cat([figures, bundle_xyz, bundle_dir], dim=1))
+        # return self.inv_renderer(figures) 
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -120,38 +149,14 @@ class UnetLightningModule(LightningModule):
         src_figure_xr_hidden = image2d
 
         # Process the inverse rendering
-        est_volume_ct, est_opaque_ct = self.forward(
-            torch.cat([
-                est_figure_ct_locked, 
-                bundle_locked.origins.permute(0,3,1,2), 
-                bundle_locked.directions.permute(0,3,1,2), 
-            ], dim=1)
-        )
-        est_volume_rn, est_opaque_rn = self.forward(
-            torch.cat([
-                est_figure_ct_random, 
-                bundle_random.origins.permute(0,3,1,2), 
-                bundle_random.directions.permute(0,3,1,2), 
-            ], dim=1)
-        )
-        est_volume_xr, est_opaque_xr = self.forward(
-            torch.cat([
-                src_figure_xr_hidden, 
-                bundle_locked.origins.permute(0,3,1,2), 
-                bundle_locked.directions.permute(0,3,1,2), 
-            ], dim=1)
-        )
+        est_volume_ct, est_opaque_ct = self.forward(est_figure_ct_locked, bundle_locked)
+        est_volume_rn, est_opaque_rn = self.forward(est_figure_ct_random, bundle_random)
+        est_volume_xr, est_opaque_xr = self.forward(src_figure_xr_hidden, bundle_locked)
 
         est_figure_xr_locked = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=est_opaque_xr, cameras=camera_locked)
         est_figure_xr_random = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=est_opaque_xr, cameras=camera_random)
         
-        rec_volume_xr, rec_opaque_xr = self.forward(            
-            torch.cat([
-                est_figure_xr_random, 
-                bundle_random.origins.permute(0,3,1,2), 
-                bundle_random.directions.permute(0,3,1,2), 
-            ], dim=1)
-        )
+        rec_volume_xr, rec_opaque_xr = self.forward(est_figure_xr_random, bundle_random)
         
         rec_figure_xr_locked = self.fwd_renderer.forward(image3d=rec_volume_xr, opacity=rec_opaque_xr, cameras=camera_locked)
         rec_figure_xr_random = self.fwd_renderer.forward(image3d=rec_volume_xr, opacity=rec_opaque_xr, cameras=camera_random)
@@ -235,6 +240,8 @@ if __name__ == "__main__":
     parser.add_argument("--notification_email", type=str, default="quantm88@gmail.com")
 
     # Model arguments
+    parser.add_argument("--n_harmonic_functions_xyz", type=int, default=10, help="Harmonic embedding xyz")
+    parser.add_argument("--n_harmonic_functions_dir", type=int, default=4, help="Harmonic embedding dir")
     parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
     parser.add_argument("--shape", type=int, default=256, help="spatial size of the tensor")
     parser.add_argument("--epochs", type=int, default=301, help="number of epochs")
