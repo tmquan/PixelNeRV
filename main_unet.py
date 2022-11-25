@@ -180,17 +180,17 @@ class UnetLightningModule(LightningModule):
 
         if batch_idx == 0:
             viz2d = torch.cat([
-                        torch.cat([src_figure_xr_hidden,
-                                   src_volume_ct[..., self.shape//2, :],
-                                   est_opaque_ct[..., self.shape//2, :],
+                        torch.cat([src_volume_ct[..., self.shape//2, :],
                                    est_figure_ct_random,
                                    est_figure_ct_locked,
-                                   ], dim=-2).transpose(2, 3),
-                        torch.cat([est_figure_xr_locked,
-                                   est_volume_xr[..., self.shape//2, :],
-                                   est_volume_ct[..., self.shape//2, :],
                                    rec_figure_ct_random,
                                    rec_figure_ct_locked,
+                                   ], dim=-2).transpose(2, 3),
+                        torch.cat([est_volume_ct[..., self.shape//2, :],
+                                   est_opaque_ct[..., self.shape//2, :],
+                                   src_figure_xr_hidden,
+                                   est_volume_xr[..., self.shape//2, :],
+                                   est_figure_xr_locked,
                                    ], dim=-2).transpose(2, 3)
                     ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
