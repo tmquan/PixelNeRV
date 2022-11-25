@@ -45,6 +45,7 @@ class DirectVolumeRenderer(nn.Module):
         norm_type="standardized", 
         scaling_factor=0.1, 
         is_grayscale=True,
+        return_bundle=False, 
     ) -> torch.Tensor:
 
         features = image3d.repeat(1, 3, 1, 1, 1) if image3d.shape[1] == 1 else image3d
@@ -64,7 +65,7 @@ class DirectVolumeRenderer(nn.Module):
         )
         # screen_RGBA, ray_bundles = self._renderer(cameras=cameras, volumes=volumes) #[...,:3]
         # rays_points = ray_bundle_to_ray_points(ray_bundles)
-        screen_RGBA, _ = self._renderer(cameras=cameras, volumes=volumes)  # [...,:3]
+        screen_RGBA, bundle = self._renderer(cameras=cameras, volumes=volumes)  # [...,:3]
 
         screen_RGBA = screen_RGBA.permute(0,3,2,1)  # 3 for NeRF
         if is_grayscale:
@@ -78,6 +79,9 @@ class DirectVolumeRenderer(nn.Module):
             screen_RGB = normalized(screen_RGB)
         elif norm_type == "standardized":
             screen_RGB = normalized(standardized(screen_RGB))
+        
+        if return_bundle:
+            return screen_RGB, bundle
         return screen_RGB
 
 
