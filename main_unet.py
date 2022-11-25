@@ -63,23 +63,14 @@ class UnetLightningModule(LightningModule):
             in_channels=7, 
             # mid_channels=17, # Spherical Harmonics Level 3
             # mid_channels=10, # Spherical Harmonics Level 2
-            mid_channels=2, # Spherical Harmonics Level 2
+            # mid_channels=2, # Spherical Harmonics Level 2
             out_channels=1, 
-            with_stn=False,
         )
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
-        
-    # def forward(self, figures, elevation, azimuth):
-    #     return self.inv_renderer(
-    #         torch.cat([
-    #             figures, 
-    #             elevation.view(-1,1,1,1).repeat(1,1,self.shape,self.shape),
-    #             azimuth.view(-1,1,1,1).repeat(1,1,self.shape,self.shape),
-    #         ], dim=1)
-    #     )    
-    def forward(self, figures, hidden_or_random=False):
-        return self.inv_renderer(figures, hidden_or_random) 
+         
+    def forward(self, figures):
+        return self.inv_renderer(figures) 
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -115,15 +106,16 @@ class UnetLightningModule(LightningModule):
             image3d=src_volume_ct, 
             opacity=src_opaque_ct, 
             cameras=camera_locked, 
-            return_bundle=True
+            return_bundle=True,
         )
+        # bundle_locked = self.fwd_renderer.raysampler(cameras=camera_locked)
         est_figure_ct_random, bundle_random = self.fwd_renderer.forward(
             image3d=src_volume_ct, 
             opacity=src_opaque_ct, 
             cameras=camera_random, 
-            return_bundle=True
+            return_bundle=True,
         )
-
+        # bundle_random = self.fwd_renderer.raysampler(cameras=camera_random)
         # XR pathway
         src_figure_xr_hidden = image2d
 

@@ -23,19 +23,18 @@ class DirectVolumeRenderer(nn.Module):
         max_depth: float = 6.0
     ):
         super().__init__()
-        raysampler = NDCMultinomialRaysampler(  
+        self.raysampler = NDCMultinomialRaysampler(  
             image_width=image_width,
             image_height=image_height,
             n_pts_per_ray=n_pts_per_ray,  
             min_depth=min_depth,
             max_depth=max_depth,
         )
-        raymarcher = EmissionAbsorptionRaymarcher()  # BackToFront Raymarcher
-        renderer = VolumeRenderer(
-            raysampler=raysampler,
-            raymarcher=raymarcher,
+        self.raymarcher = EmissionAbsorptionRaymarcher()  # BackToFront Raymarcher
+        self.renderer = VolumeRenderer(
+            raysampler=self.raysampler,
+            raymarcher=self.raymarcher,
         )
-        self._renderer = renderer
 
     def forward(
         self, 
@@ -63,9 +62,9 @@ class DirectVolumeRenderer(nn.Module):
             densities=densities,
             voxel_size=3.0 / shape,
         )
-        # screen_RGBA, ray_bundles = self._renderer(cameras=cameras, volumes=volumes) #[...,:3]
+        # screen_RGBA, ray_bundles = self.renderer(cameras=cameras, volumes=volumes) #[...,:3]
         # rays_points = ray_bundle_to_ray_points(ray_bundles)
-        screen_RGBA, bundle = self._renderer(cameras=cameras, volumes=volumes)  # [...,:3]
+        screen_RGBA, bundle = self.renderer(cameras=cameras, volumes=volumes)  # [...,:3]
 
         screen_RGBA = screen_RGBA.permute(0,3,2,1)  # 3 for NeRF
         if is_grayscale:
@@ -95,16 +94,15 @@ class DirectVolumeFrontToBackRenderer(DirectVolumeRenderer):
         max_depth: float = 6.0
     ):
         super().__init__()
-        raysampler = NDCMultinomialRaysampler(
+        self.raysampler = NDCMultinomialRaysampler(
             image_width=image_width,
             image_height=image_height,
             n_pts_per_ray=n_pts_per_ray,
             min_depth=min_depth,
             max_depth=max_depth,
         )
-        raymarcher = EmissionAbsorptionFrontToBackRaymarcher()  # FrontToBack
-        renderer = VolumeRenderer(
-            raysampler=raysampler,
-            raymarcher=raymarcher,
+        self.raymarcher = EmissionAbsorptionFrontToBackRaymarcher()  # FrontToBack
+        self.renderer = VolumeRenderer(
+            raysampler=self.raysampler,
+            raymarcher=self.raymarcher,
         )
-        self._renderer = renderer
