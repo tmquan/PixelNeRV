@@ -53,7 +53,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=2,
                 out_channels=self.out_channels+1,
-                channels=encoder_feature_channel["efficientnet-b8"],
+                channels=encoder_feature_channel["efficientnet-l2"],
                 strides=(2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
