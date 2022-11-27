@@ -2,11 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from monai.networks.layers import Norm, Reshape, AffineTransform
-from monai.networks.nets import Unet, EfficientNetBN
+from monai.networks.nets import Unet, EfficientNetBN, FlexibleUNet
 from monai.networks.nets.flexible_unet import encoder_feature_channel
 # from pytorch3d.renderer import NDCMultinomialRaysampler, VolumeRenderer
 # from pytorch3d.structures import Volumes
-from kornia.geometry.transform.imgwarp import warp_affine3d
+# from kornia.geometry.transform.imgwarp import warp_affine3d
 # from .rsh import rsh_cart_2, rsh_cart_3
 
 class UnetFrontToBackInverseRenderer(nn.Module):
@@ -26,8 +26,8 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
-                # norm=Norm.BATCH,
+                dropout=0.4,
+                norm=Norm.BATCH,
             ),
             Reshape(*[1, shape, shape, shape]),
         )
@@ -43,8 +43,8 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
-                # norm=Norm.BATCH,
+                dropout=0.4,
+                norm=Norm.BATCH,
             ),
         )
 
@@ -59,8 +59,8 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
-                # norm=Norm.BATCH,
+                dropout=0.4,
+                norm=Norm.BATCH,
             ),
             Unet(
                 spatial_dims=3,
@@ -72,8 +72,8 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
-                # norm=Norm.BATCH,
+                dropout=0.4,
+                norm=Norm.BATCH,
             ),
         )
         
