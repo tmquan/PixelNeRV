@@ -59,12 +59,14 @@ class UnetLightningModule(LightningModule):
         self.n_harmonic_functions_dir = hparams.n_harmonic_functions_dir
         self.harmonic_embedding_dir = HarmonicEmbedding(self.n_harmonic_functions_dir, append_input=True)
 
+        self.n_pts_per_ray = hparams.n_pts_per_ray
+
         self.save_hyperparameters()
 
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
             image_height=self.shape, 
-            n_pts_per_ray=400, 
+            n_pts_per_ray=512, 
             min_depth=2.0, 
             max_depth=6.0
         )
@@ -244,6 +246,7 @@ if __name__ == "__main__":
     parser.add_argument("--notification_email", type=str, default="quantm88@gmail.com")
 
     # Model arguments
+    parser.add_argument("--n_pts_per_ray", type=int, default=512, help="Sampling points per ray")
     parser.add_argument("--n_harmonic_functions_xyz", type=int, default=10, help="Harmonic embedding xyz")
     parser.add_argument("--n_harmonic_functions_dir", type=int, default=4, help="Harmonic embedding dir")
     parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
