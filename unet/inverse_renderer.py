@@ -27,7 +27,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 dropout=0.4,
-                norm=Norm.BATCH,
+                # norm=Norm.BATCH,
             ),
             Reshape(*[1, shape, shape, shape]),
         )
@@ -44,7 +44,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 dropout=0.4,
-                norm=Norm.BATCH,
+                # norm=Norm.BATCH,
             ),
         )
 
@@ -60,7 +60,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 dropout=0.4,
-                norm=Norm.BATCH,
+                # norm=Norm.BATCH,
             ),
             Unet(
                 spatial_dims=3,
@@ -73,7 +73,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 dropout=0.4,
-                norm=Norm.BATCH,
+                # norm=Norm.BATCH,
             ),
         )
         

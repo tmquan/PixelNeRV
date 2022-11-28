@@ -181,7 +181,7 @@ class UnetLightningModule(LightningModule):
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
 
-        loss = im3d_loss + im2d_loss 
+        loss = 3*im3d_loss + im2d_loss 
 
         if batch_idx == 0:
             viz2d = torch.cat([
