@@ -46,7 +46,8 @@ class UnetLightningModule(LightningModule):
         self.logsdir = hparams.logsdir
         self.lr = hparams.lr
         self.shape = hparams.shape
-        self.filter = hparams.filter
+        self.alpha = hparams.alpha
+        self.gamma = hparams.gamma
 
         self.weight_decay = hparams.weight_decay
         self.batch_size = hparams.batch_size
@@ -181,7 +182,7 @@ class UnetLightningModule(LightningModule):
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
 
-        loss = 3*im3d_loss + im2d_loss 
+        loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
 
         if batch_idx == 0:
             viz2d = torch.cat([
@@ -249,6 +250,8 @@ if __name__ == "__main__":
     parser.add_argument("--val_samples", type=int, default=400, help="validation samples")
     parser.add_argument("--test_samples", type=int, default=400, help="test samples")
 
+    parser.add_argument("--alpha", type=float, default=3., help="im3d loss")
+    parser.add_argument("--gamma", type=float, default=1., help="im2d loss")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     parser.add_argument("--lr", type=float, default=1e-4, help="adam: learning rate")
     parser.add_argument("--ckpt", type=str, default=None, help="path to checkpoint")
