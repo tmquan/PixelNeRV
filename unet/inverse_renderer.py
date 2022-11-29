@@ -30,7 +30,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 # norm=Norm.BATCH,
             ),
             Reshape(*[1, shape, shape, shape]),
-            nn.Sigmoid(),
+            nn.Tanh(),
         )
 
         self.density_net = nn.Sequential(
@@ -47,7 +47,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 dropout=0.4,
                 # norm=Norm.BATCH,
             ),
-            nn.Sigmoid(),
+            nn.Tanh(),
         )
 
         self.mixture_net = nn.Sequential(
@@ -64,7 +64,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 dropout=0.4,
                 # norm=Norm.BATCH,
             ),
-            nn.Sigmoid(),
+            nn.Tanh(),
             Unet(
                 spatial_dims=3,
                 in_channels=1,
@@ -78,13 +78,13 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 dropout=0.4,
                 # norm=Norm.BATCH,
             ), 
-            nn.Sigmoid(),
+            nn.Tanh(),
         )
         
     def forward(self, figures):
-        clarity = self.clarity_net(figures)
+        clarity = self.clarity_net(figures * 2.0 - 1.0)
         density = self.density_net(clarity)
-        volumes_opacits = self.mixture_net(torch.cat([clarity, density], dim=1))
+        volumes_opacits = self.mixture_net(torch.cat([clarity, density], dim=1)) * 0.5 + 0.5
         volumes,opacits = torch.split(volumes_opacits, [self.out_channels, 1], dim=1)
         return volumes, opacits
         
