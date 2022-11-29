@@ -30,6 +30,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 # norm=Norm.BATCH,
             ),
             Reshape(*[1, shape, shape, shape]),
+            nn.Sigmoid(),
         )
 
         self.density_net = nn.Sequential(
@@ -46,6 +47,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 dropout=0.4,
                 # norm=Norm.BATCH,
             ),
+            nn.Sigmoid(),
         )
 
         self.mixture_net = nn.Sequential(
@@ -62,6 +64,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 dropout=0.4,
                 # norm=Norm.BATCH,
             ),
+            nn.Sigmoid(),
             Unet(
                 spatial_dims=3,
                 in_channels=1,
@@ -74,7 +77,8 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 act=("LeakyReLU", {"inplace": True}),
                 dropout=0.4,
                 # norm=Norm.BATCH,
-            ),
+            ), 
+            nn.Sigmoid(),
         )
         
     def forward(self, figures):
@@ -82,5 +86,5 @@ class UnetFrontToBackInverseRenderer(nn.Module):
         density = self.density_net(clarity)
         volumes_opacits = self.mixture_net(torch.cat([clarity, density], dim=1))
         volumes,opacits = torch.split(volumes_opacits, [self.out_channels, 1], dim=1)
-        return volumes, F.softplus(opacits)
+        return volumes, opacits
         
