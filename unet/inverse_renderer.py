@@ -78,7 +78,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 dropout=0.4,
                 # norm=Norm.BATCH,
             ), 
-            # nn.Tanh(),
+            nn.Sigmoid(),
         )
         
     def forward(self, figures):
@@ -86,5 +86,5 @@ class UnetFrontToBackInverseRenderer(nn.Module):
         density = self.density_net(clarity)
         volumes_opacits = self.mixture_net(torch.cat([clarity, density], dim=1))
         volumes,opacits = torch.split(volumes_opacits, [self.out_channels, 1], dim=1)
-        return F.sigmoid(volumes), F.softplus(opacits)
+        return volumes, opacits
         
