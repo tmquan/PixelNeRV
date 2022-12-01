@@ -256,7 +256,7 @@ class UnetLightningModule(LightningModule):
                             rec_figure_ct_random, 
                             rec_figure_ct_locked, 
                             est_figure_xr_locked
-                        ][torch.randperm(3)])
+                        ])
                     )
                 info = {f'loss': loss + g_loss}
             elif optimizer_idx == 1:
@@ -265,12 +265,12 @@ class UnetLightningModule(LightningModule):
                             rec_figure_ct_random, 
                             rec_figure_ct_locked, 
                             est_figure_xr_locked
-                        ][torch.randperm(3)]), 
+                        ]), 
                         real_images=torch.cat([
                             est_figure_ct_random, 
                             est_figure_ct_locked, 
                             src_figure_xr_hidden
-                        ][torch.randperm(3)])
+                        ])
                     )
                 info = {f'loss': d_loss}
         else:
