@@ -7,6 +7,7 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (8192, rlimit[1]))
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision
 torch.cuda.empty_cache()
 torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
@@ -34,7 +35,9 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer, LightningModule
 from argparse import ArgumentParser
 from typing import Optional, Sequence
-
+from monai.networks.nets import Discriminator
+from monai.networks.nets.flexible_unet import encoder_feature_channel
+from monai.networks.layers.factories import Act, Norm, split_args
 
 from datamodule import UnpairedDataModule
 from unet.inverse_renderer import UnetFrontToBackInverseRenderer
@@ -113,6 +116,14 @@ class UnetLightningModule(LightningModule):
 
         init_weights(self.inv_renderer, init_type='xavier', init_gain=0.02)
         
+        self.discrim = Discriminator(
+            in_shape=(1, self.shape, self.shape), 
+            channels=encoder_feature_channel["efficientnet-b8"], 
+            strides=(2, 2, 2, 2, 2),
+            last_act=Act.LEAKYRELU, 
+            dropout=0.4
+        )
+        init_weights(self.discrim, init_type='xavier', init_gain=0.02)
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
          
     def forward(self, figures, bundle):
@@ -237,11 +248,50 @@ class UnetLightningModule(LightningModule):
             tensorboard = self.logger.experiment
             tensorboard.add_image(f'{stage}_samples', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
 
-        info = {f'loss': loss}
+        # info = {f'loss': loss}
+        if stage=='train':
+            if optimizer_idx == 0 : # Generator 
+                g_loss = self.gen_step(
+                        fake_images=torch.cat([
+                            rec_figure_ct_random, 
+                            rec_figure_ct_locked, 
+                            est_figure_xr_locked
+                        ][torch.randperm(3)])
+                    )
+                info = {f'loss': loss + g_loss}
+            elif optimizer_idx == 1:
+                d_loss = self.discrim_step(
+                        fake_images=torch.cat([
+                            rec_figure_ct_random, 
+                            rec_figure_ct_locked, 
+                            est_figure_xr_locked
+                        ][torch.randperm(3)]), 
+                        real_images=torch.cat([
+                            est_figure_ct_random, 
+                            est_figure_ct_locked, 
+                            src_figure_xr_hidden
+                        ][torch.randperm(3)])
+                    )
+                info = {f'loss': d_loss}
+        else:
+            info = {f'loss': loss}
         return info
 
-    def training_step(self, batch, batch_idx):
-        return self._common_step(batch, batch_idx, optimizer_idx=0, stage='train')
+    def discrim_step(self, fake_images: torch.Tensor, real_images: torch.Tensor):
+        real_logits = self.discrim(real_images.contiguous().detach()) 
+        fake_logits = self.discrim(fake_images.contiguous().detach()) 
+        real_loss = F.softplus(-real_logits).mean() 
+        fake_loss = F.softplus(+fake_logits).mean()
+        return real_loss + fake_loss 
+
+    def gen_step(self, fake_images: torch.Tensor):
+        fake_logits = self.discrim(fake_images) 
+        fake_loss = F.softplus(-fake_logits).mean()
+        return fake_loss * 2.0
+
+
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        return self._common_step(batch, batch_idx, optimizer_idx, stage='train')
 
     def validation_step(self, batch, batch_idx):
         return self._common_step(batch, batch_idx, optimizer_idx=0, stage='validation')
@@ -263,10 +313,12 @@ class UnetLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        optim_g = torch.optim.RAdam(self.inv_renderer.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        optim_d = torch.optim.RAdam(self.discrim.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=self.lr / 10)
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
-        return [optimizer], [scheduler]
+        sched_g = torch.optim.lr_scheduler.MultiStepLR(optim_g, milestones=[100, 200], gamma=0.1)
+        sched_d = torch.optim.lr_scheduler.MultiStepLR(optim_d, milestones=[100, 200], gamma=0.1)
+        return [optim_g, optim_d], [sched_g, sched_d]
 
 
 if __name__ == "__main__":

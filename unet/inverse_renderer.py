@@ -10,7 +10,7 @@ from monai.networks.nets.flexible_unet import encoder_feature_channel
 # from .rsh import rsh_cart_2, rsh_cart_3
 
 class UnetFrontToBackInverseRenderer(nn.Module):
-    def __init__(self, shape=256, in_channels=1, out_channels=1):
+    def __init__(self, shape=256, in_channels=1, out_channels=1, dropout=0.0):
         super().__init__()
         self.shape = shape
         self.in_channels = in_channels
@@ -26,7 +26,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
+                dropout=dropout,
                 # norm=Norm.BATCH,
             ),
             Reshape(*[1, shape, shape, shape]),
@@ -44,7 +44,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
+                dropout=dropout,
                 # norm=Norm.BATCH,
             ),
             # nn.Tanh(),
@@ -61,7 +61,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
+                dropout=dropout,
                 # norm=Norm.BATCH,
             ),
             # nn.Tanh(),
@@ -75,7 +75,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
+                dropout=dropout,
                 # norm=Norm.BATCH,
             ), 
             nn.Sigmoid(),
