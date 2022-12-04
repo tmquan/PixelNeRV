@@ -68,7 +68,7 @@ class UnetFrontToBackInverseRenderer(nn.Module):
             Unet(
                 spatial_dims=3,
                 in_channels=1,
-                out_channels=self.out_channels+1,
+                out_channels=self.out_channels,
                 channels=encoder_feature_channel["efficientnet-b8"],
                 strides=(2, 2, 2, 2),
                 num_res_units=2,
@@ -84,7 +84,9 @@ class UnetFrontToBackInverseRenderer(nn.Module):
     def forward(self, figures):
         clarity = self.clarity_net(figures)
         density = self.density_net(clarity)
-        volumes_opacits = self.mixture_net(torch.cat([clarity, density], dim=1))
-        volumes,opacits = torch.split(volumes_opacits, [self.out_channels, 1], dim=1)
-        return volumes, opacits
+        volumes = self.mixture_net(torch.cat([clarity, density], dim=1))
+        return volumes
+        # volumes_opacits = self.mixture_net(torch.cat([clarity, density], dim=1))
+        # volumes,opacits = torch.split(volumes_opacits, [self.out_channels, 1], dim=1)
+        # return volumes, opacits
         

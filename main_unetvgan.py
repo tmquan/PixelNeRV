@@ -173,17 +173,16 @@ class UnetLightningModule(LightningModule):
 
         # CT pathway
         src_volume_ct = image3d
-        src_opaque_ct = torch.ones_like(src_volume_ct)
         est_figure_ct_locked, bundle_locked = self.fwd_renderer.forward(
             image3d=src_volume_ct, 
-            opacity=src_opaque_ct, 
+            opacity=None, 
             cameras=camera_locked, 
             return_bundle=True,
         )
         # bundle_locked = self.fwd_renderer.raysampler(cameras=camera_locked)
         est_figure_ct_random, bundle_random = self.fwd_renderer.forward(
             image3d=src_volume_ct, 
-            opacity=src_opaque_ct, 
+            opacity=None, 
             cameras=camera_random, 
             return_bundle=True,
         )
@@ -192,22 +191,22 @@ class UnetLightningModule(LightningModule):
         src_figure_xr_hidden = image2d
 
         # Process the inverse rendering
-        est_volume_ct, est_opaque_ct = self.forward(est_figure_ct_locked, bundle_locked)
-        est_volume_rn, est_opaque_rn = self.forward(est_figure_ct_random, bundle_random)
-        est_volume_xr, est_opaque_xr = self.forward(src_figure_xr_hidden, bundle_locked)
+        est_volume_ct = self.forward(est_figure_ct_locked, bundle_locked)
+        est_volume_rn = self.forward(est_figure_ct_random, bundle_random)
+        est_volume_xr = self.forward(src_figure_xr_hidden, bundle_locked)
 
-        rec_figure_ct_locked = self.fwd_renderer.forward(image3d=est_volume_ct, opacity=est_opaque_ct, cameras=camera_locked)
-        rec_figure_ct_random = self.fwd_renderer.forward(image3d=est_volume_ct, opacity=est_opaque_ct, cameras=camera_random)
+        rec_figure_ct_locked = self.fwd_renderer.forward(image3d=est_volume_ct, opacity=None, cameras=camera_locked)
+        rec_figure_ct_random = self.fwd_renderer.forward(image3d=est_volume_ct, opacity=None, cameras=camera_random)
 
-        rec_figure_rn_locked = self.fwd_renderer.forward(image3d=est_volume_rn, opacity=est_opaque_rn, cameras=camera_locked)
-        rec_figure_rn_random = self.fwd_renderer.forward(image3d=est_volume_rn, opacity=est_opaque_rn, cameras=camera_random)
+        rec_figure_rn_locked = self.fwd_renderer.forward(image3d=est_volume_rn, opacity=None, cameras=camera_locked)
+        rec_figure_rn_random = self.fwd_renderer.forward(image3d=est_volume_rn, opacity=None, cameras=camera_random)
         
-        est_figure_xr_locked = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=est_opaque_xr, cameras=camera_locked)
-        est_figure_xr_random = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=est_opaque_xr, cameras=camera_random)
+        est_figure_xr_locked = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=None, cameras=camera_locked)
+        est_figure_xr_random = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=None, cameras=camera_random)
         
-        rec_volume_xr, rec_opaque_xr = self.forward(est_figure_xr_random, bundle_random)
+        rec_volume_xr = self.forward(est_figure_xr_random, bundle_random)
         
-        rec_figure_xr_locked = self.fwd_renderer.forward(image3d=rec_volume_xr, opacity=rec_opaque_xr, cameras=camera_locked)
+        rec_figure_xr_locked = self.fwd_renderer.forward(image3d=rec_volume_xr, opacity=None, cameras=camera_locked)
         # rec_figure_xr_random = self.fwd_renderer.forward(image3d=rec_volume_xr, opacity=rec_opaque_xr, cameras=camera_random)
     
         # Compute the loss
@@ -219,11 +218,8 @@ class UnetLightningModule(LightningModule):
                   + self.loss_smoothl1(est_figure_ct_locked, rec_figure_rn_locked) \
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_rn_random) \
                   + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked) \
-                  + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_locked) \
-                  #+ self.loss_smoothl1(est_figure_xr_locked, est_figure_xr_locked) \
-                  #+ self.loss_smoothl1(est_figure_xr_random, rec_figure_xr_random) \
+                  + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_locked) 
                   
-
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
 
@@ -238,10 +234,10 @@ class UnetLightningModule(LightningModule):
                                    rec_figure_ct_locked,
                                    ], dim=-2).transpose(2, 3),
                         torch.cat([est_volume_ct[..., self.shape//2, :],
-                                   est_opaque_ct[..., self.shape//2, :],
                                    src_figure_xr_hidden,
                                    est_volume_xr[..., self.shape//2, :],
                                    est_figure_xr_locked,
+                                   rec_figure_xr_locked,
                                    ], dim=-2).transpose(2, 3)
                     ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
