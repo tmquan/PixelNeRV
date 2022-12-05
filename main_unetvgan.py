@@ -149,13 +149,13 @@ class UnetLightningModule(LightningModule):
         image3d = batch["image3d"]
         image2d = batch["image2d"]
 
-        if stage=='train':
-            if (batch_idx % 2) == 1:
-                masked = image3d>0
-                noises = torch.rand_like(image3d) * masked.to(image3d.dtype)
-                alpha_ = torch.rand(self.batch_size, 1, 1, 1, 1, device=_device)
-                alpha_ = alpha_.expand_as(image3d)
-                image3d = alpha_ * image3d + (1 - alpha_) * noises
+        # if stage=='train':
+        #     if (batch_idx % 2) == 1:
+        #         masked = image3d>0
+        #         noises = torch.rand_like(image3d) * masked.to(image3d.dtype)
+        #         alpha_ = torch.rand(self.batch_size, 1, 1, 1, 1, device=_device)
+        #         alpha_ = alpha_.expand_as(image3d)
+        #         image3d = alpha_ * image3d + (1 - alpha_) * noises
 
         # Construct the locked camera
         dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
@@ -179,7 +179,8 @@ class UnetLightningModule(LightningModule):
             cameras=camera_locked, 
             return_bundle=True,
         )
-        # bundle_locked = self.fwd_renderer.raysampler(cameras=camera_locked)
+        # bundle_locked = self.fwd_renderer.raysampler(cameras=camera_locked)]
+
         est_figure_ct_random, bundle_random = self.fwd_renderer.forward(
             image3d=src_volume_ct, 
             opacity=None, 
@@ -187,6 +188,7 @@ class UnetLightningModule(LightningModule):
             return_bundle=True,
         )
         # bundle_random = self.fwd_renderer.raysampler(cameras=camera_random)
+
         # XR pathway
         src_figure_xr_hidden = image2d
 
@@ -248,25 +250,13 @@ class UnetLightningModule(LightningModule):
         if stage=='train':
             if optimizer_idx == 0 : # Generator 
                 g_loss = self.gen_step(
-                        fake_images=torch.cat([
-                            rec_figure_ct_random, 
-                            rec_figure_ct_locked, 
-                            est_figure_xr_locked
-                        ])
+                        fake_images=torch.cat([rec_figure_ct_random, rec_figure_ct_locked, est_figure_xr_locked])
                     )
                 info = {f'loss': loss + g_loss}
             elif optimizer_idx == 1:
                 d_loss = self.discrim_step(
-                        fake_images=torch.cat([
-                            rec_figure_ct_random, 
-                            rec_figure_ct_locked, 
-                            est_figure_xr_locked
-                        ]), 
-                        real_images=torch.cat([
-                            est_figure_ct_random, 
-                            est_figure_ct_locked, 
-                            src_figure_xr_hidden
-                        ])
+                        fake_images=torch.cat([rec_figure_ct_random, rec_figure_ct_locked, est_figure_xr_locked]), 
+                        real_images=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden])
                     )
                 info = {f'loss': d_loss}
         else:
