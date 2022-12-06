@@ -52,7 +52,7 @@ class DirectVolumeRenderer(nn.Module):
             if image3d.shape[1] != 1:
                 densities = torch.ones_like(image3d.mean(dim=1)) * scaling_factor  
             else:
-                torch.ones_like(image3d) * scaling_factor
+                densities = torch.ones_like(image3d) * scaling_factor
         else:
             densities = opacity * scaling_factor
 
