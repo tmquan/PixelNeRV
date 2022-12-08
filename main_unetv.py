@@ -86,12 +86,6 @@ class UnetLightningModule(LightningModule):
         self.batch_size = hparams.batch_size
         self.devices = hparams.devices
 
-        self.n_harmonic_functions_xyz = hparams.n_harmonic_functions_xyz
-        self.harmonic_embedding_xyz = HarmonicEmbedding(self.n_harmonic_functions_xyz, append_input=True)
-        
-        self.n_harmonic_functions_dir = hparams.n_harmonic_functions_dir
-        self.harmonic_embedding_dir = HarmonicEmbedding(self.n_harmonic_functions_dir, append_input=True)
-
         self.n_pts_per_ray = hparams.n_pts_per_ray
 
         self.save_hyperparameters()
@@ -103,91 +97,70 @@ class UnetLightningModule(LightningModule):
             min_depth=2.0, 
             max_depth=6.0
         )
-        if self.n_harmonic_functions_xyz==0 and self.n_harmonic_functions_dir==0:
-            in_channels = 1 + 3 + 3
-        else:
-            in_channels = 1 + self.harmonic_embedding_xyz.get_output_dim() + self.harmonic_embedding_dir.get_output_dim()
+        
         self.inv_renderer = UnetFrontToBackInverseRenderer(
             shape=self.shape, 
-            in_channels=in_channels, 
+            in_channels=3, 
             out_channels=1, 
             dropout=0.4,
         )
 
         init_weights(self.inv_renderer, init_type='xavier', init_gain=0.02)
         
+        self.discrim = Discriminator(
+            in_shape=(1, self.shape, self.shape), 
+            channels=encoder_feature_channel["efficientnet-b8"], 
+            strides=(2, 2, 2, 2, 2),
+            last_act=Act.LEAKYRELU, 
+            dropout=0.4
+        )
+        init_weights(self.discrim, init_type='xavier', init_gain=0.02)
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
          
-    def forward(self, figures, bundle):
-        B, C, H, W = figures.shape
-        assert B==bundle.origins.shape[0] and B==bundle.directions.shape[0]
-        if self.n_harmonic_functions_xyz > 0:
-            bundle_xyz = self.harmonic_embedding_xyz(bundle.origins.view(-1, 3))
-            bundle_xyz = bundle_xyz.view(B, H, W, -1).permute(0, 3, 1, 2)
-        else:
-            bundle_xyz = bundle.origins.permute(0, 3, 1, 2)
-
-        if self.n_harmonic_functions_dir > 0:
-            bundle_dir = self.harmonic_embedding_dir(bundle.directions.view(-1, 3))
-            bundle_dir = bundle_dir.view(B, H, W, -1).permute(0, 3, 1, 2)
-        else:
-            bundle_dir = bundle.directions.permute(0, 3, 1, 2)
-        
-        return self.inv_renderer(torch.cat([figures, bundle_xyz, bundle_dir], dim=1))
-        # return self.inv_renderer(figures) 
+    def forward(self, figures, elev, azim):      
+        return self.inv_renderer(torch.cat([figures, 
+                                            elev.repeat(1, 1, self.shape, self.shape), 
+                                            azim.repeat(1, 1, self.shape, self.shape)], dim=1))
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
         image3d = batch["image3d"]
         image2d = batch["image2d"]
 
-        # if stage=='train':
-        #     if (batch_idx % 2) == 1:
-        #         masked = image3d>0
-        #         noises = torch.rand_like(image3d) * masked.to(image3d.dtype)
-        #         alpha_ = torch.rand(self.batch_size, 1, 1, 1, 1, device=_device)
-        #         alpha_ = alpha_.expand_as(image3d)
-        #         image3d = alpha_ * image3d + (1 - alpha_) * noises
-
         # Construct the locked camera
         dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
-        elev_locked = torch.ones(self.batch_size, device=_device) * 0
-        azim_locked = torch.ones(self.batch_size, device=_device) * 0
-        R_locked, T_locked = look_at_view_transform(dist=dist_locked, elev=elev_locked, azim=azim_locked)
+        elev_locked = torch.ones(self.batch_size, device=_device)
+        azim_locked = torch.ones(self.batch_size, device=_device) 
+        R_locked, T_locked = look_at_view_transform(
+            dist=dist_locked, 
+            elev=elev_locked * 0, 
+            azim=azim_locked * 0
+        )
         camera_locked = FoVPerspectiveCameras(R=R_locked, T=T_locked, fov=45, aspect_ratio=1).to(_device)
 
         # Construct the random camera
         dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
-        elev_random = torch.rand(self.batch_size, device=_device) * 180 - 90
-        azim_random = torch.rand(self.batch_size, device=_device) * 360
-        R_random, T_random = look_at_view_transform(dist=dist_random, elev=elev_random, azim=azim_random)
+        elev_random = torch.rand(self.batch_size, device=_device) 
+        azim_random = torch.rand(self.batch_size, device=_device) 
+        R_random, T_random = look_at_view_transform(
+            dist=dist_random, 
+            elev=elev_random * 180 - 90, 
+            azim=azim_random * 360
+        )
         camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
 
         # CT pathway
         src_volume_ct = image3d
-        est_figure_ct_locked, bundle_locked = self.fwd_renderer.forward(
-            image3d=src_volume_ct, 
-            opacity=None, 
-            cameras=camera_locked, 
-            return_bundle=True,
-        )
-        # bundle_locked = self.fwd_renderer.raysampler(cameras=camera_locked)]
-
-        est_figure_ct_random, bundle_random = self.fwd_renderer.forward(
-            image3d=src_volume_ct, 
-            opacity=None, 
-            cameras=camera_random, 
-            return_bundle=True,
-        )
-        # bundle_random = self.fwd_renderer.raysampler(cameras=camera_random)
-
+        est_figure_ct_locked = self.fwd_renderer.forward(image3d=src_volume_ct, opacity=None, cameras=camera_locked)
+        est_figure_ct_random = self.fwd_renderer.forward(image3d=src_volume_ct, opacity=None, cameras=camera_random)
+        
         # XR pathway
         src_figure_xr_hidden = image2d
 
         # Process the inverse rendering
-        est_volume_ct = self.forward(est_figure_ct_locked, bundle_locked)
-        est_volume_rn = self.forward(est_figure_ct_random, bundle_random)
-        est_volume_xr = self.forward(src_figure_xr_hidden, bundle_locked)
+        est_volume_ct = self.forward(est_figure_ct_locked, elev_locked, azim_locked)
+        est_volume_rn = self.forward(est_figure_ct_random, elev_random, azim_random)
+        est_volume_xr = self.forward(src_figure_xr_hidden, elev_locked, azim_locked)
 
         rec_figure_ct_locked = self.fwd_renderer.forward(image3d=est_volume_ct, opacity=None, cameras=camera_locked)
         rec_figure_ct_random = self.fwd_renderer.forward(image3d=est_volume_ct, opacity=None, cameras=camera_random)
@@ -198,7 +171,7 @@ class UnetLightningModule(LightningModule):
         est_figure_xr_locked = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=None, cameras=camera_locked)
         est_figure_xr_random = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=None, cameras=camera_random)
         
-        rec_volume_xr = self.forward(est_figure_xr_random, bundle_random)
+        rec_volume_xr = self.forward(est_figure_xr_random, elev_random, azim_random)
         
         rec_figure_xr_locked = self.fwd_renderer.forward(image3d=rec_volume_xr, opacity=None, cameras=camera_locked)
         # rec_figure_xr_random = self.fwd_renderer.forward(image3d=rec_volume_xr, opacity=rec_opaque_xr, cameras=camera_random)
@@ -238,6 +211,7 @@ class UnetLightningModule(LightningModule):
             tensorboard = self.logger.experiment
             tensorboard.add_image(f'{stage}_samples', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
 
+        # info = {f'loss': loss}
         info = {f'loss': loss}
         return info
 

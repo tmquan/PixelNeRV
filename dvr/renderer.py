@@ -64,7 +64,7 @@ class DirectVolumeRenderer(nn.Module):
         )
         # screen_RGBA, ray_bundles = self.renderer(cameras=cameras, volumes=volumes) #[...,:3]
         # rays_points = ray_bundle_to_ray_points(ray_bundles)
-        screen_RGBA, bundle = self.renderer(cameras=cameras, volumes=volumes)  # [...,:3]
+        screen_RGBA, bundle = self.renderer(cameras=cameras, volumes=volumes) # [...,:3]
 
         screen_RGBA = screen_RGBA.permute(0,3,2,1)  # 3 for NeRF
         if is_grayscale:
