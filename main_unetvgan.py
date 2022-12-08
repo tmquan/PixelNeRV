@@ -161,31 +161,40 @@ class UnetLightningModule(LightningModule):
         est_volume_ct_locked = self.forward(est_figure_ct_locked, elev_locked, azim_locked)
         est_volume_ct_random = self.forward(est_figure_ct_random, elev_random, azim_random)
         est_volume_xr_locked = self.forward(src_figure_xr_hidden, elev_locked, azim_locked)
+        # est_volume_ct_locked, est_volume_ct_random, est_volume_xr_locked = \
+        #     torch.split(
+        #         self.forward(
+        #             torch.cat([est_figure_ct_locked, est_figure_ct_random, src_figure_xr_hidden]), 
+        #             torch.cat([elev_locked, elev_random, elev_locked]), 
+        #             torch.cat([azim_locked, azim_random, azim_locked]), 
+        #         ),
+        #         self.batch_size
+        #     )
 
-        rec_figure_ct_locked = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_locked)
-        rec_figure_ct_random = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_random)
+        rec_figure_ct_locked_locked = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_locked)
+        rec_figure_ct_locked_random = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_random)
 
-        rec_figure_rn_locked = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_locked)
-        rec_figure_rn_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_random)
+        rec_figure_ct_random_locked = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_locked)
+        rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_random)
         
-        est_figure_xr_locked = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_locked)
-        est_figure_xr_random = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_random)
+        est_figure_xr_locked_locked = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_locked)
+        est_figure_xr_locked_random = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_random)
         
-        rec_volume_xr_random = self.forward(est_figure_xr_random, elev_random, azim_random)
+        rec_volume_xr_random = self.forward(est_figure_xr_locked_random, elev_random, azim_random)
         
-        rec_figure_xr_locked = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=None, cameras=camera_locked)
-        # rec_figure_xr_random = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=rec_opaque_xr, cameras=camera_random)
+        rec_figure_xr_random_locked = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=None, cameras=camera_locked)
+        # rec_figure_xr_random_random = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=None, cameras=camera_random)
     
         # Compute the loss
         im3d_loss = self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_locked) \
                   + self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_random) 
 
-        im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked) \
-                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random) \
-                  + self.loss_smoothl1(est_figure_ct_locked, rec_figure_rn_locked) \
-                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_rn_random) \
-                  + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked) \
-                  + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_locked) 
+        im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked_locked) \
+                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_locked_random) \
+                  + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_random_locked) \
+                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_random) \
+                  + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked_locked) \
+                  + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_random_locked) 
                   
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
@@ -195,16 +204,16 @@ class UnetLightningModule(LightningModule):
         if batch_idx == 0:
             viz2d = torch.cat([
                         torch.cat([src_volume_ct_locked[..., self.shape//2, :],
-                                   est_figure_ct_random,
                                    est_figure_ct_locked,
-                                   rec_figure_ct_random,
-                                   rec_figure_ct_locked,
+                                   est_figure_ct_random,
+                                   rec_figure_ct_locked_locked,
+                                   rec_figure_ct_locked_random,
                                    ], dim=-2).transpose(2, 3),
                         torch.cat([est_volume_ct_locked[..., self.shape//2, :],
                                    src_figure_xr_hidden,
                                    est_volume_xr_locked[..., self.shape//2, :],
-                                   est_figure_xr_locked,
-                                   rec_figure_xr_locked,
+                                   est_figure_xr_locked_locked,
+                                   rec_figure_xr_random_locked,
                                    ], dim=-2).transpose(2, 3)
                     ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
@@ -215,13 +224,19 @@ class UnetLightningModule(LightningModule):
         if stage=='train':
             if optimizer_idx == 0 : # Generator 
                 g_loss = self.gen_step(
-                        fake_images=torch.cat([rec_figure_ct_random, rec_figure_ct_locked, est_figure_xr_locked])
+                        fake_images=torch.cat([rec_figure_ct_locked_locked, 
+                                               rec_figure_ct_locked_random, 
+                                               est_figure_xr_locked_locked])
                     )
                 info = {f'loss': loss + g_loss}
             elif optimizer_idx == 1:
                 d_loss = self.discrim_step(
-                        fake_images=torch.cat([rec_figure_ct_random, rec_figure_ct_locked, est_figure_xr_locked]), 
-                        real_images=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden])
+                        fake_images=torch.cat([rec_figure_ct_locked_locked, 
+                                               rec_figure_ct_locked_random, 
+                                               est_figure_xr_locked_locked]),
+                        real_images=torch.cat([est_figure_ct_locked, 
+                                               est_figure_ct_random, 
+                                               src_figure_xr_hidden])
                     )
                 info = {f'loss': d_loss}
         else:
