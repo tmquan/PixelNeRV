@@ -150,35 +150,35 @@ class UnetLightningModule(LightningModule):
         camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
 
         # CT pathway
-        src_volume_ct = image3d
-        est_figure_ct_locked = self.fwd_renderer.forward(image3d=src_volume_ct, opacity=None, cameras=camera_locked)
-        est_figure_ct_random = self.fwd_renderer.forward(image3d=src_volume_ct, opacity=None, cameras=camera_random)
+        src_volume_ct_locked = image3d
+        est_figure_ct_locked = self.fwd_renderer.forward(image3d=src_volume_ct_locked, opacity=None, cameras=camera_locked)
+        est_figure_ct_random = self.fwd_renderer.forward(image3d=src_volume_ct_locked, opacity=None, cameras=camera_random)
         
         # XR pathway
         src_figure_xr_hidden = image2d
 
         # Process the inverse rendering
-        est_volume_ct = self.forward(est_figure_ct_locked, elev_locked, azim_locked)
-        est_volume_rn = self.forward(est_figure_ct_random, elev_random, azim_random)
-        est_volume_xr = self.forward(src_figure_xr_hidden, elev_locked, azim_locked)
+        est_volume_ct_locked = self.forward(est_figure_ct_locked, elev_locked, azim_locked)
+        est_volume_ct_random = self.forward(est_figure_ct_random, elev_random, azim_random)
+        est_volume_xr_locked = self.forward(src_figure_xr_hidden, elev_locked, azim_locked)
 
-        rec_figure_ct_locked = self.fwd_renderer.forward(image3d=est_volume_ct, opacity=None, cameras=camera_locked)
-        rec_figure_ct_random = self.fwd_renderer.forward(image3d=est_volume_ct, opacity=None, cameras=camera_random)
+        rec_figure_ct_locked = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_locked)
+        rec_figure_ct_random = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_random)
 
-        rec_figure_rn_locked = self.fwd_renderer.forward(image3d=est_volume_rn, opacity=None, cameras=camera_locked)
-        rec_figure_rn_random = self.fwd_renderer.forward(image3d=est_volume_rn, opacity=None, cameras=camera_random)
+        rec_figure_rn_locked = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_locked)
+        rec_figure_rn_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_random)
         
-        est_figure_xr_locked = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=None, cameras=camera_locked)
-        est_figure_xr_random = self.fwd_renderer.forward(image3d=est_volume_xr, opacity=None, cameras=camera_random)
+        est_figure_xr_locked = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_locked)
+        est_figure_xr_random = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_random)
         
-        rec_volume_xr = self.forward(est_figure_xr_random, elev_random, azim_random)
+        rec_volume_xr_random = self.forward(est_figure_xr_random, elev_random, azim_random)
         
-        rec_figure_xr_locked = self.fwd_renderer.forward(image3d=rec_volume_xr, opacity=None, cameras=camera_locked)
-        # rec_figure_xr_random = self.fwd_renderer.forward(image3d=rec_volume_xr, opacity=rec_opaque_xr, cameras=camera_random)
+        rec_figure_xr_locked = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=None, cameras=camera_locked)
+        # rec_figure_xr_random = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=rec_opaque_xr, cameras=camera_random)
     
         # Compute the loss
-        im3d_loss = self.loss_smoothl1(src_volume_ct, est_volume_ct) \
-                  + self.loss_smoothl1(src_volume_ct, est_volume_rn) 
+        im3d_loss = self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_locked) \
+                  + self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_random) 
 
         im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked) \
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random) \
@@ -194,15 +194,15 @@ class UnetLightningModule(LightningModule):
 
         if batch_idx == 0:
             viz2d = torch.cat([
-                        torch.cat([src_volume_ct[..., self.shape//2, :],
+                        torch.cat([src_volume_ct_locked[..., self.shape//2, :],
                                    est_figure_ct_random,
                                    est_figure_ct_locked,
                                    rec_figure_ct_random,
                                    rec_figure_ct_locked,
                                    ], dim=-2).transpose(2, 3),
-                        torch.cat([est_volume_ct[..., self.shape//2, :],
+                        torch.cat([est_volume_ct_locked[..., self.shape//2, :],
                                    src_figure_xr_hidden,
-                                   est_volume_xr[..., self.shape//2, :],
+                                   est_volume_xr_locked[..., self.shape//2, :],
                                    est_figure_xr_locked,
                                    rec_figure_xr_locked,
                                    ], dim=-2).transpose(2, 3)
