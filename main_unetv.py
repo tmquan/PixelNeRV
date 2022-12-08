@@ -121,8 +121,8 @@ class UnetLightningModule(LightningModule):
 
         # Construct the locked camera
         dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
-        elev_locked = torch.ones(self.batch_size, device=_device)
-        azim_locked = torch.ones(self.batch_size, device=_device) 
+        elev_locked = torch.zeros(self.batch_size, device=_device)
+        azim_locked = torch.zeros(self.batch_size, device=_device) 
         R_locked, T_locked = look_at_view_transform(
             dist=dist_locked, 
             elev=elev_locked * 0, 
@@ -136,7 +136,7 @@ class UnetLightningModule(LightningModule):
         azim_random = torch.rand(self.batch_size, device=_device) 
         R_random, T_random = look_at_view_transform(
             dist=dist_random, 
-            elev=elev_random * 180 - 90, 
+            elev=elev_random * 180, 
             azim=azim_random * 360
         )
         camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
