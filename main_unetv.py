@@ -132,7 +132,7 @@ class UnetLightningModule(LightningModule):
 
         # Construct the random camera
         dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
-        elev_random = torch.rand(self.batch_size, device=_device) 
+        elev_random = torch.zeros(self.batch_size, device=_device) # rand or zeros is fine
         azim_random = torch.rand(self.batch_size, device=_device) 
         R_random, T_random = look_at_view_transform(
             dist=dist_random, 
@@ -413,11 +413,12 @@ if __name__ == "__main__":
     model = UnetLightningModule(
         hparams=hparams
     )
-    model = model.load_from_checkpoint(hparams.ckpt, strict=False) if hparams.ckpt is not None else model
+    # model = model.load_from_checkpoint(hparams.ckpt, strict=False) if hparams.ckpt is not None else model
 
     trainer.fit(
         model,
         datamodule,
+        ckpt_path=hparams.ckpt if hparams.ckpt is not None else None, # "some/path/to/my_checkpoint.ckpt"
     )
 
     # test
