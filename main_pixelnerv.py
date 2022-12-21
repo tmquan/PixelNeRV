@@ -58,7 +58,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
             Reshape(*[1, shape, shape, shape]),
@@ -75,7 +75,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
         )
@@ -91,7 +91,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
             # Unet(
