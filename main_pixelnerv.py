@@ -34,45 +34,88 @@ from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer, LightningModule
 from argparse import ArgumentParser
-from typing import Optional, Sequence
-from monai.networks.nets import Discriminator
-from monai.networks.nets.flexible_unet import encoder_feature_channel
-from monai.networks.layers.factories import Act, Norm, split_args
+from typing import Optional
+from monai.networks.nets import Unet #Discriminator, AttentionUnet, UNETR, SwinUNETR
+from monai.networks.layers.factories import Norm, Act
+from monai.networks.layers import Reshape
+
 
 from datamodule import UnpairedDataModule
-from unet.inverse_renderer import UnetFrontToBackInverseRenderer
 from dvr.renderer import DirectVolumeFrontToBackRenderer
 
-def init_weights(net, init_type='normal', init_gain=0.02):
-    """Initialize network weights.
-    Parameters:
-        net (network)   -- network to be initialized
-        init_type (str) -- the name of an initialization method: normal | xavier | kaiming | orthogonal
-        init_gain (float)    -- scaling factor for normal, xavier and orthogonal.
-    We use 'normal' in the original pix2pix and CycleGAN paper. But xavier and kaiming might
-    work better for some applications. Feel free to try yourself.
-    """
-    def init_func(m):  # define the initialization function
-        classname = m.__class__.__name__
-        if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
-            if init_type == 'normal':
-                nn.init.normal_(m.weight.data, 0.0, init_gain)
-            elif init_type == 'xavier':
-                nn.init.xavier_normal_(m.weight.data, gain=init_gain)
-            elif init_type == 'kaiming':
-                nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
-            elif init_type == 'orthogonal':
-                nn.init.orthogonal_(m.weight.data, gain=init_gain)
-            else:
-                raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
-            if hasattr(m, 'bias') and m.bias is not None:
-                nn.init.constant_(m.bias.data, 0.0)
-        elif classname.find('BatchNorm') != -1:  # BatchNorm Layer's weight is not a matrix; only normal distribution applies.
-            nn.init.normal_(m.weight.data, 1.0, init_gain)
-            nn.init.constant_(m.bias.data, 0.0)
-    # print('initialize network with %s' % init_type)
-    net.apply(init_func)  # apply the initialization function <init_func>
+class PixelNeRVFrontToBackInverseRenderer(nn.Module):
+    def __init__(self, in_channels=3, out_channels=1, shape=256):
+        super().__init__()
     
+        self.clarity_net = nn.Sequential(
+            Unet(
+                spatial_dims=2,
+                in_channels=in_channels,
+                out_channels=shape,
+                channels=(32, 64, 128, 256, 800),
+                strides=(2, 2, 2, 2),
+                num_res_units=4,
+                kernel_size=3,
+                up_kernel_size=3,
+                act=("LeakyReLU", {"inplace": True}),
+                dropout=0.4,
+                norm=Norm.BATCH,
+            ),
+            Reshape(*[1, shape, shape, shape]),
+        )
+        
+        self.density_net = nn.Sequential(
+            Unet(
+                spatial_dims=3,
+                in_channels=1,
+                out_channels=1,
+                channels=(32, 64, 128, 256, 800),
+                strides=(2, 2, 2, 2),
+                num_res_units=2,
+                kernel_size=3,
+                up_kernel_size=3,
+                act=("LeakyReLU", {"inplace": True}),
+                dropout=0.4,
+                norm=Norm.BATCH,
+            ),
+        )
+
+        self.mixture_net = nn.Sequential(
+            Unet(
+                spatial_dims=3,
+                in_channels=2,
+                out_channels=1,
+                channels=(32, 64, 128, 256, 800),
+                strides=(2, 2, 2, 2),
+                num_res_units=2,
+                kernel_size=3,
+                up_kernel_size=3,
+                act=("LeakyReLU", {"inplace": True}),
+                dropout=0.4,
+                norm=Norm.BATCH,
+            ),
+            Unet(
+                spatial_dims=3,
+                in_channels=1,
+                out_channels=out_channels,
+                channels=(32, 64, 128, 256, 800),
+                strides=(2, 2, 2, 2),
+                num_res_units=2,
+                kernel_size=3,
+                up_kernel_size=3,
+                act=("LeakyReLU", {"inplace": True}),
+                dropout=0.4,
+                norm=Norm.BATCH,
+            ), 
+        )
+        
+    def forward(self, figures):
+        clarity = self.clarity_net(figures)
+        density = self.density_net(clarity)
+        volumes = self.mixture_net(torch.cat([clarity, density], dim=1))
+        return volumes
+        
+
 class UnetLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
         super().__init__()
@@ -98,14 +141,7 @@ class UnetLightningModule(LightningModule):
             max_depth=6.0
         )
         
-        self.inv_renderer = UnetFrontToBackInverseRenderer(
-            shape=self.shape, 
-            in_channels=3, 
-            out_channels=1, 
-            dropout=0.4,
-        )
-
-        init_weights(self.inv_renderer, init_type='xavier', init_gain=0.02)
+        self.inv_renderer = PixelNeRVFrontToBackInverseRenderer()
         
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
          
@@ -150,28 +186,13 @@ class UnetLightningModule(LightningModule):
         
         # XR pathway
         src_figure_xr_hidden = image2d
-
-        # Process the inverse rendering
-        # est_volume_ct_locked = self.forward(est_figure_ct_locked, elev_locked, azim_locked)
-        # est_volume_ct_random = self.forward(est_figure_ct_random, elev_random, azim_random)
-        # est_volume_xr_locked = self.forward(src_figure_xr_hidden, elev_locked, azim_locked)
-        
-        # est_volume_ct_locked, est_volume_ct_random, est_volume_xr_locked = \
-        #     torch.split(
-        #         self.forward(
-        #             torch.cat([est_figure_ct_locked, est_figure_ct_random, src_figure_xr_hidden]), 
-        #             torch.cat([elev_locked, elev_random, elev_locked]), 
-        #             torch.cat([azim_locked, azim_random, azim_locked]), 
-        #         ),
-        #         self.batch_size
-        #     )
-
-        est_volume_ct_locked, est_volume_xr_locked = \
+ 
+        est_volume_ct_random, est_volume_xr_locked = \
             torch.split(
                 self.forward(
-                    torch.cat([est_figure_ct_locked, src_figure_xr_hidden]), 
-                    torch.cat([elev_locked, elev_locked]), 
-                    torch.cat([azim_locked, azim_locked]), 
+                    torch.cat([est_figure_ct_random, src_figure_xr_hidden]), 
+                    torch.cat([elev_random, elev_locked]), 
+                    torch.cat([azim_random, azim_locked]), 
                 ),
                 self.batch_size
             )
@@ -180,26 +201,25 @@ class UnetLightningModule(LightningModule):
         est_figure_xr_locked_locked = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_locked)
         est_figure_xr_locked_random = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_random)
         
-        # rec_volume_xr_random = self.forward(est_figure_xr_locked_random, elev_random, azim_random)
-        est_volume_ct_random, rec_volume_xr_random = \
+        est_volume_ct_locked, rec_volume_xr_random = \
             torch.split(
                 self.forward(
-                    torch.cat([est_figure_ct_random, est_figure_xr_locked_random]), 
-                    torch.cat([elev_random, elev_random]), 
-                    torch.cat([azim_random, azim_random]), 
+                    torch.cat([est_figure_ct_locked, est_figure_xr_locked_random]), 
+                    torch.cat([elev_locked, elev_random]), 
+                    torch.cat([azim_locked, azim_random]), 
                 ),
                 self.batch_size
             )
         
-        rec_figure_xr_random_locked = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=None, cameras=camera_locked)
-        # rec_figure_xr_random_random = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=None, cameras=camera_random)
-
         rec_figure_ct_locked_locked = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_locked)
         rec_figure_ct_locked_random = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_random)
 
         rec_figure_ct_random_locked = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_locked)
         rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_random)
         
+        rec_figure_xr_random_locked = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=None, cameras=camera_locked)
+        # rec_figure_xr_random_random = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=None, cameras=camera_random)
+      
         # Compute the loss
         im3d_loss = self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_locked) \
                   + self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_random) 
@@ -273,8 +293,6 @@ if __name__ == "__main__":
 
     # Model arguments
     parser.add_argument("--n_pts_per_ray", type=int, default=512, help="Sampling points per ray")
-    parser.add_argument("--n_harmonic_functions_xyz", type=int, default=10, help="Harmonic embedding xyz")
-    parser.add_argument("--n_harmonic_functions_dir", type=int, default=4, help="Harmonic embedding dir")
     parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
     parser.add_argument("--shape", type=int, default=256, help="spatial size of the tensor")
     parser.add_argument("--epochs", type=int, default=301, help="number of epochs")
@@ -285,7 +303,7 @@ if __name__ == "__main__":
     parser.add_argument("--alpha", type=float, default=3., help="im3d loss")
     parser.add_argument("--gamma", type=float, default=1., help="im2d loss")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
-    parser.add_argument("--lr", type=float, default=1e-4, help="adam: learning rate")
+    parser.add_argument("--lr", type=float, default=2e-4, help="adam: learning rate")
     parser.add_argument("--ckpt", type=str, default=None, help="path to checkpoint")
     parser.add_argument("--logsdir", type=str, default='logsfrecaling', help="logging directory")
     parser.add_argument("--datadir", type=str, default='data', help="data directory")
