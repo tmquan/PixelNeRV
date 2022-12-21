@@ -91,7 +91,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
+                dropout=0.4,
                 norm=Norm.BATCH,
             ),
             # Unet(
@@ -248,7 +248,7 @@ class UnetLightningModule(LightningModule):
                                    src_figure_xr_hidden,
                                    est_volume_xr_locked[..., self.shape//2, :],
                                    est_figure_xr_locked_locked,
-                                   rec_figure_xr_random_locked,
+                                   est_figure_xr_locked_random,
                                    ], dim=-2).transpose(2, 3)
                     ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
