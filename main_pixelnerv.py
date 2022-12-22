@@ -173,7 +173,9 @@ class PixelNeRVLightningModule(LightningModule):
         )
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
-         
+
+        init_weights(self.inv_renderer, init_type='xavier', init_gain=0.02)
+
     def forward(self, figures, elev, azim):      
         return self.inv_renderer(torch.cat([figures, 
                                             elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape) * 2. - 1., 
@@ -332,7 +334,7 @@ if __name__ == "__main__":
     parser.add_argument("--val_samples", type=int, default=400, help="validation samples")
     parser.add_argument("--test_samples", type=int, default=400, help="test samples")
 
-    parser.add_argument("--alpha", type=float, default=3., help="im3d loss")
+    parser.add_argument("--alpha", type=float, default=1., help="im3d loss")
     parser.add_argument("--gamma", type=float, default=1., help="im2d loss")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     parser.add_argument("--lr", type=float, default=2e-4, help="adam: learning rate")
