@@ -116,9 +116,12 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 dropout=0.4,
                 norm=Norm.BATCH,
             ),
+        )
+
+        self.refiner_net = nn.Sequential(
             Unet(
                 spatial_dims=3,
-                in_channels=1,
+                in_channels=3,
                 out_channels=out_channels,
                 channels=(32, 64, 128, 256, 512, 1024),
                 strides=(2, 2, 2, 2, 2),
@@ -134,7 +137,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
     def forward(self, figures):
         clarity = self.clarity_net(figures)
         density = self.density_net(clarity)
-        volumes = self.mixture_net(torch.cat([clarity, density], dim=1))
+        mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
+        volumes = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
         return volumes
         
 class PixelNeRVLightningModule(LightningModule):
