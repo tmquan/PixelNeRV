@@ -64,7 +64,7 @@ def init_weights(net, init_type='normal', init_gain=0.02):
     # print('initialize network with %s' % init_type)
     net.apply(init_func)  # apply the initialization function <init_func>
     
-    
+
 class PixelNeRVFrontToBackInverseRenderer(nn.Module):
     def __init__(self, in_channels=3, out_channels=1, shape=256):
         super().__init__()
@@ -167,7 +167,7 @@ class PixelNeRVLightningModule(LightningModule):
             out_channels=1, 
             shape=self.shape
         )
-        init_weights(self.inv_renderer, init_type='xavier', init_gain=0.02)
+        init_weights(self.inv_renderer, init_type='normal', init_gain=0.02)
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
          
