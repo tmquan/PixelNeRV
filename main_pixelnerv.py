@@ -7,22 +7,12 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (8192, rlimit[1]))
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torchvision
 torch.cuda.empty_cache()
 torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-from pytorch3d.renderer import (
-    VolumeRenderer,
-    NDCMultinomialRaysampler, 
-)
-
-from pytorch3d.renderer.implicit import (
-    HarmonicEmbedding
-)
 from pytorch3d.renderer.cameras import (
-    CamerasBase,
     FoVPerspectiveCameras, 
     look_at_view_transform
 )
@@ -35,7 +25,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer, LightningModule
 from argparse import ArgumentParser
 from typing import Optional
-from monai.networks.nets import Unet #Discriminator, AttentionUnet, UNETR, SwinUNETR
+from monai.networks.nets import Unet, Discriminator, AttentionUnet, UNETR, SwinUNETR
 from monai.networks.layers.factories import Norm, Act
 from monai.networks.layers import Reshape
 
@@ -145,8 +135,9 @@ class PixelNeRVLightningModule(LightningModule):
          
     def forward(self, figures, elev, azim):      
         return self.inv_renderer(torch.cat([figures, 
-                                            elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape), 
-                                            azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape)], dim=1))
+                                            elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape) * 2. - 1., 
+                                            azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
+                                            ], dim=1))
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
