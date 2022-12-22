@@ -167,7 +167,6 @@ class PixelNeRVLightningModule(LightningModule):
             out_channels=1, 
             shape=self.shape
         )
-        init_weights(self.inv_renderer, init_type='normal', init_gain=0.02)
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
          
