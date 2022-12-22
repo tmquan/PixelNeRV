@@ -36,12 +36,13 @@ from dvr.renderer import DirectVolumeFrontToBackRenderer
 class PixelNeRVFrontToBackInverseRenderer(nn.Module):
     def __init__(self, in_channels=3, out_channels=1, shape=256):
         super().__init__()
-    
-        self.clarity_net = nn.Sequential(
+        self.shape = shape
+
+        self.density_net = nn.Sequential(
             Unet(
-                spatial_dims=2,
+                spatial_dims=3,
                 in_channels=in_channels,
-                out_channels=shape,
+                out_channels=1,
                 channels=(32, 64, 128, 256, 512, 1024),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=4,
@@ -51,60 +52,29 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 dropout=0.4,
                 norm=Norm.BATCH,
             ),
-            Reshape(*[1, shape, shape, shape]),
-        )
-        
-        self.density_net = nn.Sequential(
-            Unet(
-                spatial_dims=3,
-                in_channels=1,
-                out_channels=1,
-                channels=(32, 64, 128, 256, 512, 1024),
-                strides=(2, 2, 2, 2, 2),
-                num_res_units=2,
-                kernel_size=3,
-                up_kernel_size=3,
-                act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
-                norm=Norm.BATCH,
-            ),
-        )
+        ) 
 
-        self.mixture_net = nn.Sequential(
+        self.refiner_net = nn.Sequential(
             Unet(
                 spatial_dims=3,
-                in_channels=2,
+                in_channels=1,
                 out_channels=1,
                 channels=(32, 64, 128, 256, 512, 1024),
                 strides=(2, 2, 2, 2, 2),
-                num_res_units=2,
+                num_res_units=4,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 dropout=0.4,
                 norm=Norm.BATCH,
             ),
-            Unet(
-                spatial_dims=3,
-                in_channels=1,
-                out_channels=out_channels,
-                channels=(32, 64, 128, 256, 512, 1024),
-                strides=(2, 2, 2, 2, 2),
-                num_res_units=2,
-                kernel_size=3,
-                up_kernel_size=3,
-                act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
-                norm=Norm.BATCH,
-            ), 
-        )
-        
+        ) 
+
     def forward(self, figures):
-        clarity = self.clarity_net(figures)
-        density = self.density_net(clarity)
-        volumes = self.mixture_net(torch.cat([clarity, density], dim=1))
+        sources = figures.view(-1, figures.shape[1], 1, self.shape, self.shape).repeat(1, 1, self.shape, 1, 1)
+        volumes = self.refiner_net(self.density_net(sources))
         return volumes
-        
+
 class PixelNeRVLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
         super().__init__()
