@@ -178,7 +178,7 @@ class PixelNeRVLightningModule(LightningModule):
 
     def forward(self, figures, elev, azim):      
         return self.inv_renderer(torch.cat([figures, 
-                                            elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape) * 2. - 1., 
+                                            elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape) * 0.5 + 0.5, # -1 1 to 0 1
                                             azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
                                             ], dim=1))
 
