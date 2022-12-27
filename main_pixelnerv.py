@@ -66,9 +66,10 @@ def init_weights(net, init_type='normal', init_gain=0.02):
     
 
 class PixelNeRVFrontToBackInverseRenderer(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, shape=256):
+    def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0):
         super().__init__()
-    
+        self.sh = sh
+        self.shape = shape
         self.clarity_net = nn.Sequential(
             Unet(
                 spatial_dims=2,
@@ -80,7 +81,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
             Reshape(*[1, shape, shape, shape]),
@@ -97,7 +98,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
         )
@@ -113,10 +114,30 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
         )
+
+        out_channels = 1
+        if self.sh > 0:
+            from rsh import rsh_cart_2, rsh_cart_3
+            # Generate grid
+            zs = torch.linspace(-1, 1, steps=self.shape)
+            ys = torch.linspace(-1, 1, steps=self.shape)
+            xs = torch.linspace(-1, 1, steps=self.shape)
+            z, y, x = torch.meshgrid(zs, ys, xs)
+            zyx = torch.stack([z, y, x], dim=-1) # torch.Size([100, 100, 100, 3])
+            if self.sh==3: 
+                shw = rsh_cart_3(zyx)
+                out_channels = 16
+            elif self.sh==2: 
+                shw = rsh_cart_2(zyx) 
+                out_channels = 9
+            else:
+                ValueError("Spherical Harmonics only support 2 and 3 degree")
+            # torch.Size([100, 100, 100, 9 or 16])
+            self.register_buffer('shbasis', shw.unsqueeze(0).permute(0, 4, 1, 2, 3))
 
         self.refiner_net = nn.Sequential(
             Unet(
@@ -129,7 +150,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ), 
         )
@@ -139,6 +160,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         density = self.density_net(clarity)
         mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
         volumes = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
+        if self.sh > 0:
+            return volumes*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1)
         return volumes
         
 class PixelNeRVLightningModule(LightningModule):
@@ -149,7 +172,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.shape = hparams.shape
         self.alpha = hparams.alpha
         self.gamma = hparams.gamma
-
+        self.sh = hparams.sh
         self.weight_decay = hparams.weight_decay
         self.batch_size = hparams.batch_size
         self.devices = hparams.devices
@@ -169,7 +192,8 @@ class PixelNeRVLightningModule(LightningModule):
         self.inv_renderer = PixelNeRVFrontToBackInverseRenderer(
             in_channels=3, 
             out_channels=1, 
-            shape=self.shape
+            shape=self.shape, 
+            sh=self.sh
         )
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
@@ -253,8 +277,8 @@ class PixelNeRVLightningModule(LightningModule):
         # rec_figure_xr_random_random = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=None, cameras=camera_random)
       
         # Compute the loss
-        im3d_loss = self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_locked) \
-                  + self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_random) 
+        im3d_loss = self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_locked.mean(dim=1, keepdim=True)) \
+                  + self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_random.mean(dim=1, keepdim=True)) 
 
         im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked_locked) \
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_locked_random) \
@@ -277,9 +301,9 @@ class PixelNeRVLightningModule(LightningModule):
                                    rec_figure_ct_locked_random,
                                    rec_figure_ct_random_locked,
                                    ], dim=-2).transpose(2, 3),
-                        torch.cat([est_volume_ct_locked[..., self.shape//2, :],
+                        torch.cat([est_volume_ct_locked.mean(dim=1, keepdim=True)[..., self.shape//2, :],
                                    src_figure_xr_hidden,
-                                   est_volume_xr_locked[..., self.shape//2, :],
+                                   est_volume_xr_locked.mean(dim=1, keepdim=True)[..., self.shape//2, :],
                                    est_figure_xr_locked_locked,
                                    est_figure_xr_locked_random,
                                    rec_figure_xr_random_locked,
@@ -333,7 +357,8 @@ if __name__ == "__main__":
     parser.add_argument("--train_samples", type=int, default=1000, help="training samples")
     parser.add_argument("--val_samples", type=int, default=400, help="validation samples")
     parser.add_argument("--test_samples", type=int, default=400, help="test samples")
-
+    parser.add_argument("--sh", type=int, default=0, help="degree of spherical harmonic (2, 3")
+    
     parser.add_argument("--alpha", type=float, default=1., help="im3d loss")
     parser.add_argument("--gamma", type=float, default=1., help="im2d loss")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")

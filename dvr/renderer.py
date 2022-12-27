@@ -50,12 +50,12 @@ class DirectVolumeRenderer(nn.Module):
         features = image3d.repeat(1, 3, 1, 1, 1) if image3d.shape[1] == 1 else image3d
         if opacity is None:
             if image3d.shape[1] != 1:
-                densities = torch.ones_like(image3d.mean(dim=1)) * scaling_factor  
+                densities = torch.ones_like(image3d.mean(dim=1, keepdim=True)) * scaling_factor  
             else:
                 densities = torch.ones_like(image3d) * scaling_factor
         else:
             densities = opacity * scaling_factor
-
+        # print(image3d.shape, densities.shape)
         shape = max(image3d.shape[1], image3d.shape[2])
         volumes = Volumes(
             features=features,
