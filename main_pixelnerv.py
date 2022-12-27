@@ -184,7 +184,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
             image_height=self.shape, 
-            n_pts_per_ray=512, 
+            n_pts_per_ray=self.n_pts_per_ray, 
             min_depth=2.0, 
             max_depth=6.0
         )
