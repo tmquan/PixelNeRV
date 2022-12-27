@@ -120,7 +120,6 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             ),
         )
 
-        out_channels = 1
         if self.sh > 0:
             from rsh import rsh_cart_2, rsh_cart_3
             # Generate grid
@@ -129,12 +128,12 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             xs = torch.linspace(-1, 1, steps=self.shape)
             z, y, x = torch.meshgrid(zs, ys, xs)
             zyx = torch.stack([z, y, x], dim=-1) # torch.Size([100, 100, 100, 3])
-            if self.sh==3: 
-                shw = rsh_cart_3(zyx)
-                out_channels = 16
-            elif self.sh==2: 
+            if self.sh==2: 
                 shw = rsh_cart_2(zyx) 
-                out_channels = 9
+                assert out_channels == 9
+            elif self.sh==3: 
+                shw = rsh_cart_3(zyx)
+                assert out_channels == 16
             else:
                 ValueError("Spherical Harmonics only support 2 and 3 degree")
             # torch.Size([100, 100, 100, 9 or 16])
@@ -194,7 +193,7 @@ class PixelNeRVLightningModule(LightningModule):
         
         self.inv_renderer = PixelNeRVFrontToBackInverseRenderer(
             in_channels=3, 
-            out_channels=1, 
+            out_channels=9 if self.sh==2 else 16 if self.sh==3 else 1, 
             shape=self.shape, 
             sh=self.sh
         )
