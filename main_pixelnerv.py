@@ -7,6 +7,7 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (8192, rlimit[1]))
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision
 torch.cuda.empty_cache()
 torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
@@ -161,9 +162,9 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
         results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
         if self.sh > 0:
-            volumes = torch.functional.sigmoid( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
+            volumes = F.sigmoid( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
         else:
-            volumes = torch.functional.sigmoid( results )
+            volumes = F.sigmoid( results )
         return volumes
         
 class PixelNeRVLightningModule(LightningModule):
