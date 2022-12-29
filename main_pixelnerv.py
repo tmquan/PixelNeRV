@@ -82,7 +82,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
+                dropout=0.4,
                 norm=Norm.BATCH,
             ),
             Reshape(*[1, shape, shape, shape]),
@@ -99,7 +99,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
+                dropout=0.4,
                 norm=Norm.BATCH,
             ),
         )
@@ -115,7 +115,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
+                dropout=0.4,
                 norm=Norm.BATCH,
             ),
         )
@@ -150,7 +150,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
+                dropout=0.4,
                 norm=Norm.BATCH,
             ), 
         )
@@ -255,40 +255,15 @@ class PixelNeRVLightningModule(LightningModule):
                 self.batch_size
             )
 
-        
-        est_figure_xr_locked_locked = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_locked)
-        est_figure_xr_locked_random = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_random)
-        
-        est_volume_ct_locked, rec_volume_xr_random = \
-            torch.split(
-                self.forward(
-                    torch.cat([est_figure_ct_locked, est_figure_xr_locked_random]), 
-                    torch.cat([elev_locked, elev_random]), 
-                    torch.cat([azim_locked, azim_random]), 
-                ),
-                self.batch_size
-            )
-        
-        rec_figure_ct_locked_locked = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_locked)
-        rec_figure_ct_locked_random = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_random)
-
         rec_figure_ct_random_locked = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_locked)
-        rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_random)
+        est_figure_xr_locked_locked = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_locked)
         
-        rec_figure_xr_random_locked = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=None, cameras=camera_locked)
-        # rec_figure_xr_random_random = self.fwd_renderer.forward(image3d=rec_volume_xr_random, opacity=None, cameras=camera_random)
-      
         # Compute the loss
-        im3d_loss = self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_locked.mean(dim=1, keepdim=True)) \
-                  + self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_random.mean(dim=1, keepdim=True)) 
+        im3d_loss = self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_random.mean(dim=1, keepdim=True)) 
 
-        im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked_locked) \
-                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_locked_random) \
-                  + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_random_locked) \
-                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_random) \
-                  + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked_locked) \
-                  + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_random_locked) 
-                  
+        im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_random_locked) \
+                  + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked_locked) 
+                            
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
 
@@ -299,16 +274,12 @@ class PixelNeRVLightningModule(LightningModule):
                         torch.cat([src_volume_ct_locked[..., self.shape//2, :],
                                    est_figure_ct_locked,
                                    est_figure_ct_random,
-                                   rec_figure_ct_locked_locked,
-                                   rec_figure_ct_locked_random,
                                    rec_figure_ct_random_locked,
                                    ], dim=-2).transpose(2, 3),
-                        torch.cat([est_volume_ct_locked.mean(dim=1, keepdim=True)[..., self.shape//2, :],
+                        torch.cat([est_volume_ct_random.mean(dim=1, keepdim=True)[..., self.shape//2, :],
                                    src_figure_xr_hidden,
                                    est_volume_xr_locked.mean(dim=1, keepdim=True)[..., self.shape//2, :],
                                    est_figure_xr_locked_locked,
-                                   est_figure_xr_locked_random,
-                                   rec_figure_xr_random_locked,
                                    ], dim=-2).transpose(2, 3)
                     ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
