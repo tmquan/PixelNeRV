@@ -245,23 +245,32 @@ class PixelNeRVLightningModule(LightningModule):
         # XR pathway
         src_figure_xr_hidden = image2d
  
-        est_volume_ct_random, est_volume_xr_locked = \
+        est_volume_ct_locked, est_volume_ct_random, est_volume_xr_locked = \
             torch.split(
                 self.forward(
-                    torch.cat([est_figure_ct_random, src_figure_xr_hidden]), 
-                    torch.cat([elev_random, elev_locked]), 
-                    torch.cat([azim_random, azim_locked]), 
+                    torch.cat([est_figure_ct_locked, est_figure_ct_random, src_figure_xr_hidden]), 
+                    torch.cat([elev_locked, elev_random, elev_locked]), 
+                    torch.cat([azim_locked, azim_random, azim_locked]), 
                 ),
                 self.batch_size
             )
 
+        rec_figure_ct_locked_locked = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_locked)
+        rec_figure_ct_locked_random = self.fwd_renderer.forward(image3d=est_volume_ct_locked, opacity=None, cameras=camera_random)
+
         rec_figure_ct_random_locked = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_locked)
+        rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_random)
+        
         est_figure_xr_locked_locked = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_locked)
         
         # Compute the loss
-        im3d_loss = self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_random.sum(dim=1, keepdim=True)) 
+        im3d_loss = self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_random.sum(dim=1, keepdim=True)) \
+                  + self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_locked.sum(dim=1, keepdim=True)) 
 
-        im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_random_locked) \
+        im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked_locked) \
+                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_locked_random) \
+                  + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_random_locked) \
+                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_random) \
                   + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked_locked) 
                             
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
@@ -271,14 +280,16 @@ class PixelNeRVLightningModule(LightningModule):
 
         if batch_idx == 0:
             viz2d = torch.cat([
-                        torch.cat([src_volume_ct_locked[..., self.shape//2, :],
-                                   est_figure_ct_locked,
+                        torch.cat([est_figure_ct_locked,
                                    est_figure_ct_random,
+                                   rec_figure_ct_locked_locked,
+                                   rec_figure_ct_locked_random,
                                    rec_figure_ct_random_locked,
                                    ], dim=-2).transpose(2, 3),
-                        torch.cat([est_volume_ct_random.sum(dim=1, keepdim=True)[..., self.shape//2, :],
+                        torch.cat([src_volume_ct_locked[..., self.shape//2, :],
+                                   est_volume_ct_locked.mean(dim=1, keepdim=True)[..., self.shape//2, :],
                                    src_figure_xr_hidden,
-                                   est_volume_xr_locked.sum(dim=1, keepdim=True)[..., self.shape//2, :],
+                                   est_volume_xr_locked.mean(dim=1, keepdim=True)[..., self.shape//2, :],
                                    est_figure_xr_locked_locked,
                                    ], dim=-2).transpose(2, 3)
                     ], dim=-2)
