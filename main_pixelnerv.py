@@ -287,10 +287,10 @@ class PixelNeRVLightningModule(LightningModule):
                                    rec_figure_ct_random_locked,
                                    ], dim=-2).transpose(2, 3),
                         torch.cat([src_volume_ct_locked[..., self.shape//2, :],
-                                   est_volume_ct_locked.mean(dim=1, keepdim=True)[..., self.shape//2, :],
                                    src_figure_xr_hidden,
                                    est_volume_xr_locked.mean(dim=1, keepdim=True)[..., self.shape//2, :],
                                    est_figure_xr_locked_locked,
+                                   est_volume_ct_locked.mean(dim=1, keepdim=True)[..., self.shape//2, :],
                                    ], dim=-2).transpose(2, 3)
                     ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
