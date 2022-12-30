@@ -155,7 +155,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             ), 
         )
         
-    def forward(self, figures, norm_type="normalized"):
+    def forward(self, figures, norm_type="standardized"):
         clarity = self.clarity_net(figures)
         density = self.density_net(clarity)
         mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
@@ -166,13 +166,13 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         else:
             volumes = F.relu( results )
         
-        # Squashing the result
-        if norm_type == "minimized":
-            volumes = minimized(volumes)
-        elif norm_type == "normalized":
-            volumes = normalized(volumes)
-        elif norm_type == "standardized":
-            volumes = normalized(standardized(volumes))
+        # # Squashing the result
+        # if norm_type == "minimized":
+        #     volumes = minimized(volumes)
+        # elif norm_type == "normalized":
+        #     volumes = normalized(volumes)
+        # elif norm_type == "standardized":
+        #     volumes = normalized(standardized(volumes))
 
         return volumes  
         
