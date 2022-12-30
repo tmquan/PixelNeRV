@@ -161,9 +161,9 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
         results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
         if self.sh > 0:
-            volumes = F.sigmoid( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
+            volumes = F.leaky_relu( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
         else:
-            volumes = F.sigmoid( results )
+            volumes = F.leaky_relu( results )
         return volumes
         
 class PixelNeRVLightningModule(LightningModule):
