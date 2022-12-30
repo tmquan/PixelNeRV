@@ -164,7 +164,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             volumes = F.relu( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
         else:
             volumes = F.relu( results )
-        volumes /= (volumes.max + 1e-8) # Squashing the result
+        volumes /= (volumes.max() + 1e-8) # Squashing the result
         return volumes
         
 class PixelNeRVLightningModule(LightningModule):
