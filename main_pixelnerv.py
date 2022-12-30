@@ -32,7 +32,7 @@ from monai.networks.layers import Reshape
 
 
 from datamodule import UnpairedDataModule
-from dvr.renderer import DirectVolumeFrontToBackRenderer
+from dvr.renderer import DirectVolumeFrontToBackRenderer, minimized, normalized, standardized
 
 
 def init_weights(net, init_type='normal', init_gain=0.02):
@@ -155,17 +155,26 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             ), 
         )
         
-    def forward(self, figures):
+    def forward(self, figures, norm_type="normalized"):
         clarity = self.clarity_net(figures)
         density = self.density_net(clarity)
         mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
         results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
+        
         if self.sh > 0:
             volumes = F.relu( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
         else:
             volumes = F.relu( results )
-        volumes /= (volumes.max() + 1e-8) # Squashing the result
-        return volumes
+        
+        # Squashing the result
+        if norm_type == "minimized":
+            volumes = minimized(volumes)
+        elif norm_type == "normalized":
+            volumes = normalized(volumes)
+        elif norm_type == "standardized":
+            volumes = normalized(standardized(volumes))
+
+        return volumes  
         
 class PixelNeRVLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
