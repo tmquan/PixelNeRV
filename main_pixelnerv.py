@@ -200,7 +200,7 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
-        # init_weights(self.inv_renderer, init_type='xavier', init_gain=0.02)
+        init_weights(self.inv_renderer, init_type='xavier', init_gain=0.02)
 
     def forward(self, figures, elev, azim):      
         return self.inv_renderer(torch.cat([figures, 
