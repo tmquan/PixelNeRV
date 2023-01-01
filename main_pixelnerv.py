@@ -30,6 +30,7 @@ from monai.networks.nets import Unet, Discriminator, AttentionUnet, UNETR, SwinU
 from monai.networks.layers.factories import Norm, Act
 from monai.networks.layers import Reshape
 
+from positional_encodings.torch_encodings import PositionalEncodingPermute3D
 
 from datamodule import UnpairedDataModule
 from dvr.renderer import DirectVolumeFrontToBackRenderer, minimized, normalized, standardized
@@ -67,9 +68,10 @@ def init_weights(net, init_type='normal', init_gain=0.02):
     
 
 class PixelNeRVFrontToBackInverseRenderer(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0):
+    def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0, pe=8):
         super().__init__()
         self.sh = sh
+        self.pe = pe
         self.shape = shape
         self.clarity_net = nn.Sequential(
             Unet(
@@ -82,16 +84,20 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
             Reshape(*[1, shape, shape, shape]),
         )
-        
+        if self.pe>0:
+            pe_channels = self.pe
+        else:
+            pe_channels = 0
+
         self.density_net = nn.Sequential(
             Unet(
                 spatial_dims=3,
-                in_channels=1,
+                in_channels=1+pe_channels,
                 out_channels=1,
                 channels=(32, 64, 128, 256, 512, 1024),
                 strides=(2, 2, 2, 2, 2),
@@ -99,7 +105,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
         )
@@ -107,7 +113,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         self.mixture_net = nn.Sequential(
             Unet(
                 spatial_dims=3,
-                in_channels=2,
+                in_channels=2+pe_channels,
                 out_channels=1,
                 channels=(32, 64, 128, 256, 512, 1024),
                 strides=(2, 2, 2, 2, 2),
@@ -115,7 +121,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
         )
@@ -142,7 +148,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         self.refiner_net = nn.Sequential(
             Unet(
                 spatial_dims=3,
-                in_channels=3,
+                in_channels=3+pe_channels,
                 out_channels=out_channels,
                 channels=(32, 64, 128, 256, 512, 1024),
                 strides=(2, 2, 2, 2, 2),
@@ -150,16 +156,26 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ), 
         )
         
+        if self.pe > 0:
+            self.encoder_net = PositionalEncodingPermute3D(self.pe) # 8
+            
     def forward(self, figures, norm_type="standardized"):
         clarity = self.clarity_net(figures)
-        density = self.density_net(clarity)
-        mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
-        results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
+        if self.pe > 0:
+            pos_enc = torch.zeros((clarity.shape[0], self.pe, clarity.shape[2], clarity.shape[3], clarity.shape[3]), device=clarity.device)
+            encoded = self.encoder_net(pos_enc)
+            density = self.density_net(torch.cat([encoded, clarity], dim=1))
+            mixture = self.mixture_net(torch.cat([encoded, clarity, density], dim=1))
+            results = self.refiner_net(torch.cat([encoded, clarity, density, mixture], dim=1))
+        else:
+            density = self.density_net(torch.cat([clarity], dim=1))
+            mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
+            results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
         
         if self.sh > 0:
             volumes = F.relu( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
@@ -185,6 +201,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.alpha = hparams.alpha
         self.gamma = hparams.gamma
         self.sh = hparams.sh
+        self.pe = hparams.pe
         self.weight_decay = hparams.weight_decay
         self.batch_size = hparams.batch_size
         self.devices = hparams.devices
@@ -205,7 +222,8 @@ class PixelNeRVLightningModule(LightningModule):
             in_channels=3, 
             out_channels=9 if self.sh==2 else 16 if self.sh==3 else 1, 
             shape=self.shape, 
-            sh=self.sh
+            sh=self.sh, 
+            pe=self.pe,
         )
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
@@ -351,7 +369,8 @@ if __name__ == "__main__":
     parser.add_argument("--train_samples", type=int, default=1000, help="training samples")
     parser.add_argument("--val_samples", type=int, default=400, help="validation samples")
     parser.add_argument("--test_samples", type=int, default=400, help="test samples")
-    parser.add_argument("--sh", type=int, default=0, help="degree of spherical harmonic (2, 3")
+    parser.add_argument("--sh", type=int, default=0, help="degree of spherical harmonic (2, 3)")
+    parser.add_argument("--pe", type=int, default=0, help="positional encoding (0 - 8)")
     
     parser.add_argument("--alpha", type=float, default=1., help="im3d loss")
     parser.add_argument("--gamma", type=float, default=1., help="im2d loss")
