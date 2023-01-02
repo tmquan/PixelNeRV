@@ -209,6 +209,11 @@ class PixelNeRVLightningModule(LightningModule):
                 in_channels=1,
                 num_classes=6,
             )
+            # Initialize the weights/bias with identity transformation
+            self.stn_modifier._fc.weight.data.zero_()
+            self.stn_modifier._fc.bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
+
+            
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
             image_height=self.shape, 
