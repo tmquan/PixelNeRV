@@ -283,13 +283,14 @@ class PixelNeRVLightningModule(LightningModule):
         # XR pathway
         if self.st == 1:
             # src_figure_xr_hidden = self.stn_forward(image2d)
-            est_figure_ct_locked_stn, est_figure_ct_random_stn, src_figure_xr_hidden = \
+            est_figure_ct_locked_stn, src_figure_xr_hidden = \
             torch.split(
                 self.stn_forward(
-                    torch.cat([est_figure_ct_locked, est_figure_ct_random, image2d]), 
+                    torch.cat([est_figure_ct_locked, image2d]), 
                 ),
                 self.batch_size
             )
+            est_figure_ct_random_stn = est_figure_ct_random 
             
         else:
             src_figure_xr_hidden = image2d
