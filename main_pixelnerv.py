@@ -26,7 +26,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer, LightningModule
 from argparse import ArgumentParser
 from typing import Optional
-from monai.networks.nets import Unet, Discriminator, AttentionUnet, UNETR, SwinUNETR
+from monai.networks.nets import Unet, EfficientNetBN
 from monai.networks.layers.factories import Norm, Act
 from monai.networks.layers import Reshape
 
@@ -73,58 +73,12 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         self.sh = sh
         self.pe = pe
         self.shape = shape
-        self.clarity_net = nn.Sequential(
-            Unet(
-                spatial_dims=2,
-                in_channels=in_channels,
-                out_channels=shape,
-                channels=(32, 64, 128, 256, 512, 1024),
-                strides=(2, 2, 2, 2, 2),
-                num_res_units=4,
-                kernel_size=3,
-                up_kernel_size=3,
-                act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
-                norm=Norm.BATCH,
-            ),
-            Reshape(*[1, shape, shape, shape]),
-        )
+
         if self.pe>0:
+            self.encoder_net = PositionalEncodingPermute3D(self.pe) # 8
             pe_channels = self.pe
         else:
             pe_channels = 0
-
-        self.density_net = nn.Sequential(
-            Unet(
-                spatial_dims=3,
-                in_channels=1+pe_channels,
-                out_channels=1,
-                channels=(32, 64, 128, 256, 512, 1024),
-                strides=(2, 2, 2, 2, 2),
-                num_res_units=2,
-                kernel_size=3,
-                up_kernel_size=3,
-                act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
-                norm=Norm.BATCH,
-            ),
-        )
-
-        self.mixture_net = nn.Sequential(
-            Unet(
-                spatial_dims=3,
-                in_channels=2+pe_channels,
-                out_channels=1,
-                channels=(32, 64, 128, 256, 512, 1024),
-                strides=(2, 2, 2, 2, 2),
-                num_res_units=2,
-                kernel_size=3,
-                up_kernel_size=3,
-                act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
-                norm=Norm.BATCH,
-            ),
-        )
 
         if self.sh > 0:
             from rsh import rsh_cart_2, rsh_cart_3
@@ -145,25 +99,71 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             # torch.Size([100, 100, 100, 9 or 16])
             self.register_buffer('shbasis', shw.unsqueeze(0).permute(0, 4, 1, 2, 3))
 
+        self.clarity_net = nn.Sequential(
+            Unet(
+                spatial_dims=2,
+                in_channels=in_channels,
+                out_channels=shape,
+                channels=(32, 48, 80, 224, 640),
+                strides=(2, 2, 2, 2),
+                num_res_units=4,
+                kernel_size=3,
+                up_kernel_size=3,
+                act=("LeakyReLU", {"inplace": True}),
+                dropout=0.4,
+                norm=Norm.BATCH,
+            ),
+            Reshape(*[1, shape, shape, shape]),
+        )
+        
+        self.density_net = nn.Sequential(
+            Unet(
+                spatial_dims=3,
+                in_channels=1+pe_channels,
+                out_channels=1,
+                channels=(32, 48, 80, 224, 640),
+                strides=(2, 2, 2, 2),
+                num_res_units=2,
+                kernel_size=3,
+                up_kernel_size=3,
+                act=("LeakyReLU", {"inplace": True}),
+                dropout=0.4,
+                norm=Norm.BATCH,
+            ),
+        )
+
+        self.mixture_net = nn.Sequential(
+            Unet(
+                spatial_dims=3,
+                in_channels=2+pe_channels,
+                out_channels=1,
+                channels=(32, 48, 80, 224, 640),
+                strides=(2, 2, 2, 2),
+                num_res_units=2,
+                kernel_size=3,
+                up_kernel_size=3,
+                act=("LeakyReLU", {"inplace": True}),
+                dropout=0.4,
+                norm=Norm.BATCH,
+            ),
+        )
+
         self.refiner_net = nn.Sequential(
             Unet(
                 spatial_dims=3,
                 in_channels=3+pe_channels,
                 out_channels=out_channels,
-                channels=(32, 64, 128, 256, 512, 1024),
-                strides=(2, 2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640),
+                strides=(2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # dropout=0.4,
+                dropout=0.4,
                 norm=Norm.BATCH,
             ), 
         )
-        
-        if self.pe > 0:
-            self.encoder_net = PositionalEncodingPermute3D(self.pe) # 8
-            
+             
     def forward(self, figures, norm_type="standardized"):
         clarity = self.clarity_net(figures)
         if self.pe > 0:
@@ -181,14 +181,6 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             volumes = F.relu( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
         else:
             volumes = F.relu( results )
-        
-        # # Squashing the result
-        # if norm_type == "minimized":
-        #     volumes = minimized(volumes)
-        # elif norm_type == "normalized":
-        #     volumes = normalized(volumes)
-        # elif norm_type == "standardized":
-        #     volumes = normalized(standardized(volumes))
 
         return volumes  
         
@@ -200,6 +192,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.shape = hparams.shape
         self.alpha = hparams.alpha
         self.gamma = hparams.gamma
+        self.st = hparams.st
         self.sh = hparams.sh
         self.pe = hparams.pe
         self.weight_decay = hparams.weight_decay
@@ -210,6 +203,12 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.save_hyperparameters()
 
+        if self.st>0:
+            self.stn_modifier = EfficientNetBN(
+                model_name="efficientnet-b7", #(32, 48, 80, 224, 640)
+                in_channels=1,
+                num_classes=6,
+            )
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
             image_height=self.shape, 
@@ -228,7 +227,13 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
-        init_weights(self.inv_renderer, init_type='xavier', init_gain=0.02)
+    # Spatial transformer network forward function
+    def stn(self, x):
+        theta = self.stn_modifier(x)
+        theta = theta.view(-1, 2, 3)
+        grid = F.affine_grid(theta, x.size())
+        xs = F.grid_sample(x, grid)
+        return xs
 
     def forward(self, figures, elev, azim):      
         return self.inv_renderer(torch.cat([figures, 
@@ -271,8 +276,12 @@ class PixelNeRVLightningModule(LightningModule):
         est_figure_ct_random = self.fwd_renderer.forward(image3d=src_volume_ct_locked, opacity=None, cameras=camera_random)
         
         # XR pathway
-        src_figure_xr_hidden = image2d
- 
+        if self.st == 1:
+            src_figure_xr_hidden = self.stn(image2d)
+            # print(image2d.shape, src_figure_xr_hidden.shape)
+        else:
+            src_figure_xr_hidden = image2d
+
         est_volume_ct_locked, est_volume_ct_random, est_volume_xr_locked = \
             torch.split(
                 self.forward(
@@ -313,8 +322,10 @@ class PixelNeRVLightningModule(LightningModule):
                                    rec_figure_ct_locked_locked,
                                    rec_figure_ct_locked_random,
                                    rec_figure_ct_random_locked,
+                                   rec_figure_ct_random_random,
                                    ], dim=-2).transpose(2, 3),
-                        torch.cat([src_volume_ct_locked[..., self.shape//2, :],
+                        torch.cat([src_volume_ct_locked[..., self.shape//2, :], 
+                                   image2d, 
                                    src_figure_xr_hidden,
                                    est_volume_xr_locked.sum(dim=1, keepdim=True)[..., self.shape//2, :],
                                    est_figure_xr_locked_locked,
@@ -369,6 +380,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_samples", type=int, default=1000, help="training samples")
     parser.add_argument("--val_samples", type=int, default=400, help="validation samples")
     parser.add_argument("--test_samples", type=int, default=400, help="test samples")
+    parser.add_argument("--st", type=int, default=1, help="with spatial transformer network")
     parser.add_argument("--sh", type=int, default=0, help="degree of spherical harmonic (2, 3)")
     parser.add_argument("--pe", type=int, default=0, help="positional encoding (0 - 8)")
     
