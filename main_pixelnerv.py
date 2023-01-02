@@ -104,13 +104,13 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=2,
                 in_channels=in_channels,
                 out_channels=shape,
-                channels=(32, 48, 80, 224, 640),
-                strides=(2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640, 800),
+                strides=(2, 2, 2, 2, 2),
                 num_res_units=4,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
             Reshape(*[1, shape, shape, shape]),
@@ -121,13 +121,13 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=1+pe_channels,
                 out_channels=1,
-                channels=(32, 48, 80, 224, 640),
-                strides=(2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640, 800),
+                strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
         )
@@ -137,13 +137,13 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=2+pe_channels,
                 out_channels=1,
-                channels=(32, 48, 80, 224, 640),
-                strides=(2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640, 800),
+                strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ),
         )
@@ -153,13 +153,13 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=3+pe_channels,
                 out_channels=out_channels,
-                channels=(32, 48, 80, 224, 640),
-                strides=(2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640, 800),
+                strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                dropout=0.4,
+                # dropout=0.4,
                 norm=Norm.BATCH,
             ), 
         )
@@ -205,7 +205,7 @@ class PixelNeRVLightningModule(LightningModule):
 
         if self.st>0:
             self.stn_modifier = EfficientNetBN(
-                model_name="efficientnet-b7", #(32, 48, 80, 224, 640)
+                model_name="efficientnet-b7", #(32, 48, 80, 224, 640, 800)
                 in_channels=1,
                 num_classes=6,
             )
@@ -233,7 +233,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
     # Spatial transformer network forward function
-    def stn(self, x):
+    def stn_forward(self, x):
         theta = self.stn_modifier(x)
         theta = theta.view(-1, 2, 3)
         grid = F.affine_grid(theta, x.size())
@@ -282,15 +282,24 @@ class PixelNeRVLightningModule(LightningModule):
         
         # XR pathway
         if self.st == 1:
-            src_figure_xr_hidden = self.stn(image2d)
-            # print(image2d.shape, src_figure_xr_hidden.shape)
+            # src_figure_xr_hidden = self.stn_forward(image2d)
+            est_figure_ct_locked_stn, est_figure_ct_random_stn, src_figure_xr_hidden = \
+            torch.split(
+                self.stn_forward(
+                    torch.cat([est_figure_ct_locked, est_figure_ct_random, image2d]), 
+                ),
+                self.batch_size
+            )
+            
         else:
             src_figure_xr_hidden = image2d
+            est_figure_ct_locked_stn = est_figure_ct_locked
+            est_figure_ct_random_stn = est_figure_ct_random 
 
         est_volume_ct_locked, est_volume_ct_random, est_volume_xr_locked = \
             torch.split(
                 self.forward(
-                    torch.cat([est_figure_ct_locked, est_figure_ct_random, src_figure_xr_hidden]), 
+                    torch.cat([est_figure_ct_locked_stn, est_figure_ct_random_stn, src_figure_xr_hidden]), 
                     torch.cat([elev_locked, elev_random, elev_locked]), 
                     torch.cat([azim_locked, azim_random, azim_locked]), 
                 ),
@@ -383,7 +392,7 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        optimizer = torch.optim.RAdam(self.inv_renderer.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
         return [optimizer], [scheduler]
 
