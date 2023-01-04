@@ -203,15 +203,15 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.save_hyperparameters()
 
-        # if self.st>0:
-        #     self.stn_modifier = EfficientNetBN(
-        #         model_name="efficientnet-b7", #(32, 48, 80, 224, 640, 800)
-        #         in_channels=1,
-        #         num_classes=6,
-        #     )
-        #     # Initialize the weights/bias with identity transformation
-        #     self.stn_modifier._fc.weight.data.zero_()
-        #     self.stn_modifier._fc.bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
+        if self.st>0:
+            self.stn_modifier = EfficientNetBN(
+                model_name="efficientnet-b7", #(32, 48, 80, 224, 640, 800)
+                in_channels=1,
+                num_classes=6,
+            )
+            # Initialize the weights/bias with identity transformation
+            self.stn_modifier._fc.weight.data.zero_()
+            self.stn_modifier._fc.bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
             
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
@@ -231,13 +231,13 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
-    # # Spatial transformer network forward function
-    # def stn_forward(self, x):
-    #     theta = self.stn_modifier(x)
-    #     theta = theta.view(-1, 2, 3)
-    #     grid = F.affine_grid(theta, x.size())
-    #     xs = F.grid_sample(x, grid)
-    #     return xs
+    # Spatial transformer network forward function
+    def stn_forward(self, x):
+        theta = self.stn_modifier(x)
+        theta = theta.view(-1, 2, 3)
+        grid = F.affine_grid(theta, x.size())
+        xs = F.grid_sample(x, grid)
+        return xs
 
     def forward(self, figures, elev, azim):      
         return self.inv_renderer(torch.cat([figures, 
@@ -280,21 +280,10 @@ class PixelNeRVLightningModule(LightningModule):
         est_figure_ct_random = self.fwd_renderer.forward(image3d=src_volume_ct_locked, opacity=None, cameras=camera_random)
         
         # XR pathway
-        # if self.st == 1:
-        #     # src_figure_xr_hidden = self.stn_forward(image2d)
-        #     est_figure_ct_locked_stn, src_figure_xr_hidden = \
-        #     torch.split(
-        #         self.stn_forward(
-        #             torch.cat([est_figure_ct_locked, image2d]), 
-        #         ),
-        #         self.batch_size
-        #     )
-        #     est_figure_ct_random_stn = est_figure_ct_random           
-        # else:
-        #     src_figure_xr_hidden = image2d
-        #     est_figure_ct_locked_stn = est_figure_ct_locked
-        #     est_figure_ct_random_stn = est_figure_ct_random 
-        src_figure_xr_hidden = image2d
+        if self.st == 1:
+            src_figure_xr_hidden = self.stn_forward(image2d)
+        else:
+            src_figure_xr_hidden = image2d
         est_volume_ct_locked, est_volume_ct_random, est_volume_xr_locked = \
             torch.split(
                 self.forward(
