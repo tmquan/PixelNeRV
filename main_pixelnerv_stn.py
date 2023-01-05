@@ -192,7 +192,6 @@ class PixelNeRVLightningModule(LightningModule):
         self.shape = hparams.shape
         self.alpha = hparams.alpha
         self.gamma = hparams.gamma
-        self.theta = hparams.theta
         self.st = hparams.st
         self.sh = hparams.sh
         self.pe = hparams.pe
@@ -204,11 +203,15 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.save_hyperparameters()
 
-        self.cam_frumstum = EfficientNetBN(
-            model_name="efficientnet-b7", #(32, 48, 80, 224, 640, 800)
-            in_channels=1,
-            num_classes=2,
-        )
+        if self.st>0:
+            self.stn_modifier = EfficientNetBN(
+                model_name="efficientnet-b7", #(32, 48, 80, 224, 640, 800)
+                in_channels=1,
+                num_classes=6,
+            )
+            # Initialize the weights/bias with identity transformation
+            self.stn_modifier._fc.weight.data.zero_()
+            self.stn_modifier._fc.bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
             
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
@@ -227,6 +230,14 @@ class PixelNeRVLightningModule(LightningModule):
         )
 
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
+
+    # Spatial transformer network forward function
+    def stn_forward(self, x):
+        theta = self.stn_modifier(x)
+        theta = theta.view(-1, 2, 3)
+        grid = F.affine_grid(theta, x.size())
+        xs = F.grid_sample(x, grid)
+        return xs
 
     def forward(self, figures, elev, azim):      
         return self.inv_renderer(torch.cat([figures, 
@@ -269,31 +280,16 @@ class PixelNeRVLightningModule(LightningModule):
         est_figure_ct_random = self.fwd_renderer.forward(image3d=src_volume_ct_locked, opacity=None, cameras=camera_random)
         
         # XR pathway
-        src_figure_xr_hidden = image2d
-        est_elev_azim_locked, est_elev_azim_random, est_elev_azim_hidden = \
-            torch.split(
-                self.cam_frumstum(
-                    torch.cat([est_figure_ct_locked, est_figure_ct_random, src_figure_xr_hidden]), 
-                 ),
-                self.batch_size
-            )
-        est_elev_locked, est_azim_locked = torch.split(est_elev_azim_locked, 1, dim=1)
-        est_elev_random, est_azim_random = torch.split(est_elev_azim_random, 1, dim=1)
-        est_elev_hidden, est_azim_hidden = torch.split(est_elev_azim_hidden, 1, dim=1)
-        est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
-        R_hidden, T_hidden = look_at_view_transform(
-            dist=est_dist_hidden.float(), 
-            elev=est_elev_hidden.float() * 90, 
-            azim=est_azim_hidden.float() * 360
-        )
-        camera_hidden = FoVPerspectiveCameras(R=R_hidden, T=T_hidden, fov=45, aspect_ratio=1).to(_device)
-
-        est_volume_ct_locked, est_volume_ct_random, est_volume_xr_hidden = \
+        if self.st == 1:
+            src_figure_xr_hidden = self.stn_forward(image2d)
+        else:
+            src_figure_xr_hidden = image2d
+        est_volume_ct_locked, est_volume_ct_random, est_volume_xr_locked = \
             torch.split(
                 self.forward(
                     torch.cat([est_figure_ct_locked, est_figure_ct_random, src_figure_xr_hidden]), 
-                    torch.cat([est_elev_locked, est_elev_random, est_elev_hidden]), 
-                    torch.cat([est_azim_locked, est_azim_random, est_azim_hidden]), 
+                    torch.cat([elev_locked, elev_random, elev_locked]), 
+                    torch.cat([azim_locked, azim_random, azim_locked]), 
                 ),
                 self.batch_size
             )
@@ -304,7 +300,7 @@ class PixelNeRVLightningModule(LightningModule):
         rec_figure_ct_random_locked = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_locked)
         rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_random)
         
-        est_figure_xr_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_xr_hidden, opacity=None, cameras=camera_hidden)
+        est_figure_xr_locked_locked = self.fwd_renderer.forward(image3d=est_volume_xr_locked, opacity=None, cameras=camera_locked)
         
         # Compute the loss
         im3d_loss = self.loss_smoothl1(src_volume_ct_locked, est_volume_ct_random.sum(dim=1, keepdim=True)) \
@@ -314,16 +310,10 @@ class PixelNeRVLightningModule(LightningModule):
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_locked_random) \
                   + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_random_locked) \
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_random) \
-                  + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_hidden_hidden) 
-
-        view_loss = self.loss_smoothl1(elev_locked, est_elev_locked) \
-                  + self.loss_smoothl1(azim_locked, est_azim_locked) \
-                  + self.loss_smoothl1(elev_random, est_elev_random) \
-                  + self.loss_smoothl1(azim_random, est_azim_random)  
-
+                  + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked_locked) 
+                            
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-        self.log(f'{stage}_view_loss', view_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
 
         loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
 
@@ -341,8 +331,8 @@ class PixelNeRVLightningModule(LightningModule):
                                    ], dim=-2).transpose(2, 3),
                         torch.cat([image2d, 
                                    src_figure_xr_hidden,
-                                   est_volume_xr_hidden.sum(dim=1, keepdim=True)[..., self.shape//2, :],
-                                   est_figure_xr_hidden_hidden,
+                                   est_volume_xr_locked.sum(dim=1, keepdim=True)[..., self.shape//2, :],
+                                   est_figure_xr_locked_locked,
                                    ], dim=-2).transpose(2, 3),
 
                         # torch.cat([est_figure_ct_locked,
@@ -355,8 +345,8 @@ class PixelNeRVLightningModule(LightningModule):
                         # torch.cat([src_volume_ct_locked[..., self.shape//2, :], 
                         #            image2d, 
                         #            src_figure_xr_hidden,
-                        #            est_volume_xr_hidden.sum(dim=1, keepdim=True)[..., self.shape//2, :],
-                        #            est_figure_xr_hidden_hidden,
+                        #            est_volume_xr_locked.sum(dim=1, keepdim=True)[..., self.shape//2, :],
+                        #            est_figure_xr_locked_locked,
                         #            est_volume_ct_locked.sum(dim=1, keepdim=True)[..., self.shape//2, :],
                         #            ], dim=-2).transpose(2, 3)
                     ], dim=-2)
@@ -412,9 +402,8 @@ if __name__ == "__main__":
     parser.add_argument("--sh", type=int, default=0, help="degree of spherical harmonic (2, 3)")
     parser.add_argument("--pe", type=int, default=0, help="positional encoding (0 - 8)")
     
-    parser.add_argument("--alpha", type=float, default=1., help="vol loss")
-    parser.add_argument("--gamma", type=float, default=1., help="img loss")
-    parser.add_argument("--theta", type=float, default=1., help="cam loss")
+    parser.add_argument("--alpha", type=float, default=1., help="im3d loss")
+    parser.add_argument("--gamma", type=float, default=1., help="im2d loss")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     parser.add_argument("--lr", type=float, default=2e-4, help="adam: learning rate")
     parser.add_argument("--ckpt", type=str, default=None, help="path to checkpoint")
