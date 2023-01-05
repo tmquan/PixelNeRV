@@ -26,7 +26,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer, LightningModule
 from argparse import ArgumentParser
 from typing import Optional
-from monai.networks.nets import Unet, EfficientNetBN
+from monai.networks.nets import Unet, EfficientNetBN, DenseNet121
 from monai.networks.layers.factories import Norm, Act
 from monai.networks.layers import Reshape
 
@@ -204,10 +204,16 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.save_hyperparameters()
 
-        self.cam_frumstum = EfficientNetBN(
-            model_name="efficientnet-b7", #(32, 48, 80, 224, 640, 800)
+        # self.cam_settings = EfficientNetBN(
+        #     model_name="efficientnet-b7", #(32, 48, 80, 224, 640, 800)
+        #     in_channels=1,
+        #     num_classes=2,
+        # )
+        self.cam_settings = DenseNet121(
+            spatial_dims=2,
             in_channels=1,
-            num_classes=2,
+            out_channels=2, 
+            pretrained=True, 
         )
             
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
@@ -259,7 +265,7 @@ class PixelNeRVLightningModule(LightningModule):
         src_figure_xr_hidden = image2d
         est_elev_azim_random, est_elev_azim_hidden = \
             torch.split(
-                self.cam_frumstum(
+                self.cam_settings(
                     torch.cat([est_figure_ct_random, src_figure_xr_hidden]), 
                  ),
                 self.batch_size
@@ -270,7 +276,7 @@ class PixelNeRVLightningModule(LightningModule):
 
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         R_hidden, T_hidden = look_at_view_transform(
-            dist=est_dist_hidden.float(), 
+            dist=est_dist_hidden, 
             elev=est_elev_hidden.float() * 90, 
             azim=est_azim_hidden.float() * 360
         )
@@ -362,7 +368,7 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
         return [optimizer], [scheduler]
 
