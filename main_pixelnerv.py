@@ -236,7 +236,7 @@ class PixelNeRVLightningModule(LightningModule):
     def stn_forward(self, x):
         theta = self.stn_modifier(x)
         # theta = theta.view(-1, 2, 3)
-        theta = F.tanh(theta.view(-1, 2, 3)) * 2 # Donot let affine matrix go to far, reg by tanh
+        theta = F.tanh(theta.view(-1, 2, 3)) * 1.2 # Don't let affine matrix go too far, regularized by tanh
         grid = F.affine_grid(theta, x.size())
         xs = F.grid_sample(x, grid)
         return xs
