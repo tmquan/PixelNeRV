@@ -255,27 +255,21 @@ class PixelNeRVLightningModule(LightningModule):
         image3d = batch["image3d"]
         image2d = batch["image2d"]
 
-        # Construct the random cameras
-        # src_elev_random = 0.0*torch.ones(self.batch_size, device=_device)
-        # # src_azim_random = 0.00*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
-        # # src_azim_random = 0.25*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
-        # src_azim_random = 0.50*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
-        src_elev_random = torch.clamp(
+        # Construct the origin/random cameras
+        src_elev_origin = torch.clamp(
                             torch.randn(self.batch_size, device=_device), 
                             min=-0.5, max=0.5) # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
-        src_azim_random = torch.rand(self.batch_size, device=_device) # 0 1 -> 0 360
-        
-        # with torch.no_grad():
-        src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
-        R_random, T_random = look_at_view_transform(
-            dist=src_dist_random.float(), 
-            elev=src_elev_random.float() * 90, 
-            azim=src_azim_random.float() * 360
+        src_azim_origin = torch.rand(self.batch_size, device=_device) # 0 1 -> 0 360
+        src_dist_origin = 4.0 * torch.ones(self.batch_size, device=_device)
+        R_origin, T_origin = look_at_view_transform(
+            dist=src_dist_origin.float(), 
+            elev=src_elev_origin.float() * 90, 
+            azim=src_azim_origin.float() * 360
         )
-        camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
+        camera_origin = FoVPerspectiveCameras(R=R_origin, T=T_origin, fov=45, aspect_ratio=1).to(_device)
 
         # CT pathway
-        est_figure_ct_random = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_random)
+        est_figure_ct_random = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_origin)
         
         # XR pathway
         src_figure_xr_hidden = image2d
@@ -289,9 +283,16 @@ class PixelNeRVLightningModule(LightningModule):
             )
 
         est_elev_random, est_azim_random = torch.split(est_elev_azim_random, 1, dim=1)
+        est_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
+        R_random, T_random = look_at_view_transform(
+            dist=est_dist_random, 
+            elev=torch.remainder(est_elev_random.float(), 1) * 90, 
+            azim=torch.remainder(est_azim_random.float(), 1) * 360
+        )
+        camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
+
+
         est_elev_hidden, est_azim_hidden = torch.split(est_elev_azim_hidden, 1, dim=1)
-        
-        # with torch.no_grad():
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         R_hidden, T_hidden = look_at_view_transform(
             dist=est_dist_hidden, 
