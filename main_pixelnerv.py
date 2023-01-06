@@ -291,13 +291,16 @@ class PixelNeRVLightningModule(LightningModule):
                 )(est_figure_ct_locked[b])
 
             # Forward the spatial correction
-            est_figure_ct_locked_warped, src_figure_xr_hidden = \
-                torch.split(
-                    self.stn_forward(
-                        torch.cat([est_figure_ct_locked_deform, image2d]), 
-                    ),
-                    self.batch_size
-                )
+            # est_figure_ct_locked_warped, src_figure_xr_hidden = \
+            #     torch.split(
+            #         self.stn_forward(
+            #             torch.cat([est_figure_ct_locked_deform, image2d]), 
+            #         ),
+            #         self.batch_size
+            #     )
+            est_figure_ct_locked_warped = self.stn_forward(est_figure_ct_locked_deform)
+            with torch.no_grad():
+                src_figure_xr_hidden = self.stn_forward(image2d).detach()
         else:
             src_figure_xr_hidden = image2d
         est_volume_ct_locked, est_volume_ct_random, est_volume_xr_locked = \
@@ -327,7 +330,7 @@ class PixelNeRVLightningModule(LightningModule):
                   + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_random_locked) \
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_random) \
                   + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked_locked) 
-                  
+
         if self.st==1:
             im2d_loss += self.loss_smoothl1(est_figure_ct_locked, est_figure_ct_locked_warped) \
                             
@@ -337,6 +340,7 @@ class PixelNeRVLightningModule(LightningModule):
         loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
 
         if batch_idx == 0:
+            tensorboard = self.logger.experiment
             viz2d = torch.cat([
                         torch.cat([src_volume_ct_locked[..., self.shape//2, :], 
                                    est_figure_ct_locked,
@@ -352,26 +356,25 @@ class PixelNeRVLightningModule(LightningModule):
                                    src_figure_xr_hidden,
                                    est_volume_xr_locked.sum(dim=1, keepdim=True)[..., self.shape//2, :],
                                    est_figure_xr_locked_locked,
-                                   ], dim=-2).transpose(2, 3),
-
-                        # torch.cat([est_figure_ct_locked,
-                        #            est_figure_ct_random,
-                        #            rec_figure_ct_locked_locked,
-                        #            rec_figure_ct_locked_random,
-                        #            rec_figure_ct_random_locked,
-                        #            rec_figure_ct_random_random,
-                        #            ], dim=-2).transpose(2, 3),
-                        # torch.cat([src_volume_ct_locked[..., self.shape//2, :], 
-                        #            image2d, 
-                        #            src_figure_xr_hidden,
-                        #            est_volume_xr_locked.sum(dim=1, keepdim=True)[..., self.shape//2, :],
-                        #            est_figure_xr_locked_locked,
-                        #            est_volume_ct_locked.sum(dim=1, keepdim=True)[..., self.shape//2, :],
-                        #            ], dim=-2).transpose(2, 3)
+                                   ], dim=-2).transpose(2, 3),            
                     ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
-            tensorboard = self.logger.experiment
             tensorboard.add_image(f'{stage}_samples', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
+            
+            res2d = torch.cat([
+                        torch.cat([est_figure_ct_locked_deform,
+                                   est_figure_ct_locked_warped,
+                                   (est_figure_ct_locked-est_figure_ct_locked_deform).abs(),
+                                   (est_figure_ct_locked-est_figure_ct_locked_warped).abs(),
+                                   ], dim=-2).transpose(2, 3),     
+                        torch.cat([est_figure_ct_locked, 
+                                   image2d, 
+                                   src_figure_xr_hidden,
+                                   (image2d-src_figure_xr_hidden).abs(),
+                                   ], dim=-2).transpose(2, 3),                
+                    ], dim=-2)
+            grid = torchvision.utils.make_grid(res2d, normalize=False, scale_each=False, nrow=1, padding=0)
+            tensorboard.add_image(f'{stage}_residual', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
 
         info = {f'loss': loss}
         return info
