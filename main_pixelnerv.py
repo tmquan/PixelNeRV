@@ -241,11 +241,11 @@ class PixelNeRVLightningModule(LightningModule):
                                             ], dim=1))
 
     def forward_camera(self, figures):   
-        # return self.cam_settings(figures)   
-        elev_azim = self.cam_settings(figures)
-        elev = F.tanh(elev_azim[:, [0]])      #-1 1
-        azim = F.sigmoid(elev_azim[:, [1]])   # 0 1
-        return torch.stack([elev, azim], dim=1)
+        return self.cam_settings(figures)   
+        # elev_azim = self.cam_settings(figures)
+        # elev = F.tanh(elev_azim[:, [0]])      #-1 1
+        # azim = F.sigmoid(elev_azim[:, [1]])   # 0 1
+        # return torch.stack([elev, azim], dim=1)
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -253,6 +253,10 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
 
         # Construct the random cameras
+        # src_elev_random = 0.0*torch.ones(self.batch_size, device=_device)
+        # src_azim_random = 0.00*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
+        # src_azim_random = 1.25*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
+        # src_azim_random = 2.50*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
         src_elev_random = torch.clamp(
                             torch.randn(self.batch_size, device=_device), 
                             min=-0.5, max=0.5) # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
@@ -288,8 +292,8 @@ class PixelNeRVLightningModule(LightningModule):
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         R_hidden, T_hidden = look_at_view_transform(
             dist=est_dist_hidden, 
-            elev=est_elev_hidden.clamp(-1, 1).float() * 90, 
-            azim=est_azim_hidden.clamp( 0, 1).float() * 360
+            elev=torch.remainder(est_elev_hidden.float(), 1) * 90, 
+            azim=torch.remainder(est_azim_hidden.float(), 1) * 360
         )
         camera_hidden = FoVPerspectiveCameras(R=R_hidden, T=T_hidden, fov=45, aspect_ratio=1).to(_device)
 
