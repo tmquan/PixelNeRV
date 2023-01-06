@@ -29,7 +29,7 @@ from typing import Optional
 from monai.networks.nets import Unet, EfficientNetBN
 from monai.networks.layers.factories import Norm, Act
 from monai.networks.layers import Reshape
-
+from monai.transforms import RandAffine, RandAffineGrid
 from positional_encodings.torch_encodings import PositionalEncodingPermute3D
 
 from datamodule import UnpairedDataModule
@@ -211,8 +211,8 @@ class PixelNeRVLightningModule(LightningModule):
             )
             # Initialize the weights/bias with identity transformation
             self.stn_modifier._fc.weight.data.zero_()
-            self.stn_modifier._fc.bias.data.copy_(torch.tensor([2, 0, 0, 
-                                                                0, 2, 0], dtype=torch.float))
+            self.stn_modifier._fc.bias.data.copy_(torch.tensor([1, 0, 0, 
+                                                                0, 1, 0], dtype=torch.float))
             
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
@@ -235,8 +235,8 @@ class PixelNeRVLightningModule(LightningModule):
     # Spatial transformer network forward function
     def stn_forward(self, x):
         theta = self.stn_modifier(x)
-        # theta = theta.view(-1, 2, 3)
-        theta = F.tanh(theta.view(-1, 2, 3)) * 1.2 # Don't let affine matrix go too far, regularized by tanh
+        theta = theta.view(-1, 2, 3)
+        # theta = F.tanh(theta.view(-1, 2, 3)) * 1.2 # Don't let affine matrix go too far, regularized by tanh
         grid = F.affine_grid(theta, x.size())
         xs = F.grid_sample(x, grid)
         return xs
@@ -283,7 +283,21 @@ class PixelNeRVLightningModule(LightningModule):
         
         # XR pathway
         if self.st == 1:
-            src_figure_xr_hidden = self.stn_forward(image2d)
+            # Random affine the canonical CT projection and try to recon
+            est_figure_ct_locked_deform = torch.zeros_like(est_figure_ct_locked)
+            for b in range(self.batch_size):
+                est_figure_ct_locked_deform[b] = torchvision.transforms.RandomAffine(
+                    degrees=(-10, 10), translate=(0.2, 0.2), scale=(0.8, 1.2), shear=(-10, 10, -10, 10)
+                )(est_figure_ct_locked[b])
+
+            # Forward the spatial correction
+            est_figure_ct_locked_warped, src_figure_xr_hidden = \
+                torch.split(
+                    self.stn_forward(
+                        torch.cat([est_figure_ct_locked_deform, image2d]), 
+                    ),
+                    self.batch_size
+                )
         else:
             src_figure_xr_hidden = image2d
         est_volume_ct_locked, est_volume_ct_random, est_volume_xr_locked = \
@@ -313,6 +327,9 @@ class PixelNeRVLightningModule(LightningModule):
                   + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_random_locked) \
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_random) \
                   + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_locked_locked) 
+                  
+        if self.st==1:
+            im2d_loss += self.loss_smoothl1(est_figure_ct_locked, est_figure_ct_locked_warped) \
                             
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
