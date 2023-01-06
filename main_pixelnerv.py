@@ -241,11 +241,11 @@ class PixelNeRVLightningModule(LightningModule):
                                             ], dim=1))
 
     def forward_camera(self, figures):   
-        return self.cam_settings(figures)   
-        # elev_azim = self.cam_settings(figures)
-        # elev = F.tanh(elev_azim[:, [0]])      #-1 1
-        # azim = F.sigmoid(elev_azim[:, [1]])   # 0 1
-        # return torch.stack([elev, azim], dim=1)
+        # return self.cam_settings(figures)   
+        elev_azim = self.cam_settings(figures)
+        elev = F.tanh(elev_azim[:, [0]])      #-1 1
+        azim = F.sigmoid(elev_azim[:, [1]])   # 0 1
+        return torch.stack([elev, azim], dim=1)
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
