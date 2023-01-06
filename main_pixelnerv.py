@@ -283,10 +283,7 @@ class PixelNeRVLightningModule(LightningModule):
 
         est_elev_random, est_azim_random = torch.split(est_elev_azim_random, 1, dim=1)
         est_elev_hidden, est_azim_hidden = torch.split(est_elev_azim_hidden, 1, dim=1)
-        # est_elev_random = est_elev_random.clamp(-1, 1)
-        # est_azim_random = est_azim_random.clamp( 0, 1)
-        # est_elev_hidden = est_elev_hidden.clamp(-1, 1)
-        # est_azim_hidden = est_azim_hidden.clamp( 0, 1)
+        
         # with torch.no_grad():
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         R_hidden, T_hidden = look_at_view_transform(
