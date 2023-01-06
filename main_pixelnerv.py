@@ -256,15 +256,15 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
 
         # Construct the origin/random cameras
-        src_elev_origin = torch.clamp(
+        src_elev_random = torch.clamp(
                             torch.randn(self.batch_size, device=_device), 
                             min=-0.5, max=0.5) # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
-        src_azim_origin = torch.rand(self.batch_size, device=_device) # 0 1 -> 0 360
-        src_dist_origin = 4.0 * torch.ones(self.batch_size, device=_device)
+        src_azim_random = torch.rand(self.batch_size, device=_device) # 0 1 -> 0 360
+        src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         R_origin, T_origin = look_at_view_transform(
-            dist=src_dist_origin.float(), 
-            elev=src_elev_origin.float() * 90, 
-            azim=src_azim_origin.float() * 360
+            dist=src_dist_random.float(), 
+            elev=src_elev_random.float() * 90, 
+            azim=src_azim_random.float() * 360
         )
         camera_origin = FoVPerspectiveCameras(R=R_origin, T=T_origin, fov=45, aspect_ratio=1).to(_device)
 
