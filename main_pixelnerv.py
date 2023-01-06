@@ -258,14 +258,14 @@ class PixelNeRVLightningModule(LightningModule):
                             min=-0.5, max=0.5) # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
         src_azim_random = torch.rand(self.batch_size, device=_device) # 0 1 -> 0 360
         
-        with torch.no_grad():
-            src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
-            R_random, T_random = look_at_view_transform(
-                dist=src_dist_random.float(), 
-                elev=src_elev_random.float() * 90, 
-                azim=src_azim_random.float() * 360
-            )
-            camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
+        # with torch.no_grad():
+        src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
+        R_random, T_random = look_at_view_transform(
+            dist=src_dist_random.float(), 
+            elev=src_elev_random.float() * 90, 
+            azim=src_azim_random.float() * 360
+        )
+        camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
 
         # CT pathway
         est_figure_ct_random = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_random)
@@ -287,14 +287,14 @@ class PixelNeRVLightningModule(LightningModule):
         # est_azim_random = est_azim_random.clamp( 0, 1)
         # est_elev_hidden = est_elev_hidden.clamp(-1, 1)
         # est_azim_hidden = est_azim_hidden.clamp( 0, 1)
-        with torch.no_grad():
-            est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
-            R_hidden, T_hidden = look_at_view_transform(
-                dist=est_dist_hidden, 
-                elev=est_elev_hidden.clamp(-1, 1).float() * 90, 
-                azim=est_azim_hidden.clamp( 0, 1).float() * 360
-            )
-            camera_hidden = FoVPerspectiveCameras(R=R_hidden, T=T_hidden, fov=45, aspect_ratio=1).to(_device)
+        # with torch.no_grad():
+        est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
+        R_hidden, T_hidden = look_at_view_transform(
+            dist=est_dist_hidden, 
+            elev=est_elev_hidden.clamp(-1, 1).float() * 90, 
+            azim=est_azim_hidden.clamp( 0, 1).float() * 360
+        )
+        camera_hidden = FoVPerspectiveCameras(R=R_hidden, T=T_hidden, fov=45, aspect_ratio=1).to(_device)
 
         est_figure_ct_hidden = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_hidden)
         
