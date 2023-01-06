@@ -215,7 +215,10 @@ class PixelNeRVLightningModule(LightningModule):
         #     out_channels=2, 
         #     pretrained=True, 
         # )
-            
+        # Initialize the weights/bias with zeros (elev and azim) transformation
+        self.cam_settings._fc.weight.data.zero_()
+        self.cam_settings._fc.bias.data.zero_()
+
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
             image_height=self.shape, 
@@ -254,9 +257,9 @@ class PixelNeRVLightningModule(LightningModule):
 
         # Construct the random cameras
         # src_elev_random = 0.0*torch.ones(self.batch_size, device=_device)
-        # src_azim_random = 0.00*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
-        # src_azim_random = 1.25*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
-        # src_azim_random = 2.50*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
+        # # src_azim_random = 0.00*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
+        # # src_azim_random = 0.25*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
+        # src_azim_random = 0.50*torch.ones(self.batch_size, device=_device) # 0 1 -> 0 360
         src_elev_random = torch.clamp(
                             torch.randn(self.batch_size, device=_device), 
                             min=-0.5, max=0.5) # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
