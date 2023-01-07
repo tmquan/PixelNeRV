@@ -234,12 +234,12 @@ class PixelNeRVLightningModule(LightningModule):
             sh=self.sh, 
             pe=self.pe,
         )
-
+        init_weights(self.inv_renderer, init_type='normal', init_gain=0.02)
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
     def forward(self, figures, elev, azim):      
         return self.inv_renderer(torch.cat([figures, 
-                                            elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape) * 0.5 + 0.5, # -1 1 to 0 1
+                                            elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape) * 0.5 + 0.5, # -1 1 to 0 1                                      azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
                                             azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
                                             ], dim=1))
 
@@ -256,9 +256,7 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
 
         # Construct the origin/random cameras
-        src_elev_random = torch.clamp(
-                            torch.randn(self.batch_size, device=_device), 
-                            min=-0.5, max=0.5) # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
+        src_elev_random = torch.randn(self.batch_size, device=_device) / 5 # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
         src_azim_random = torch.rand(self.batch_size, device=_device) # 0 1 -> 0 360
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         R_origin, T_origin = look_at_view_transform(
