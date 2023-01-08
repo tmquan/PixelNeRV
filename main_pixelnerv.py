@@ -361,20 +361,21 @@ class PixelNeRVLightningModule(LightningModule):
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
             tensorboard.add_image(f'{stage}_samples', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
             
-            res2d = torch.cat([
-                        torch.cat([est_figure_ct_locked_deform,
-                                   est_figure_ct_locked_warped,
-                                   (est_figure_ct_locked-est_figure_ct_locked_deform).abs(),
-                                   est_figure_ct_locked
-                                   ], dim=-2).transpose(2, 3),     
-                        torch.cat([image2d, 
-                                   src_figure_xr_hidden,
-                                   (image2d-src_figure_xr_hidden).abs(),
-                                   (est_figure_ct_locked-est_figure_ct_locked_warped).abs(),
-                                   ], dim=-2).transpose(2, 3),                
-                    ], dim=-2)
-            grid = torchvision.utils.make_grid(res2d, normalize=False, scale_each=False, nrow=1, padding=0)
-            tensorboard.add_image(f'{stage}_residual', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
+            if self.st==1:
+                res2d = torch.cat([
+                            torch.cat([est_figure_ct_locked_deform,
+                                    est_figure_ct_locked_warped,
+                                    (est_figure_ct_locked-est_figure_ct_locked_deform).abs(),
+                                    est_figure_ct_locked
+                                    ], dim=-2).transpose(2, 3),     
+                            torch.cat([image2d, 
+                                    src_figure_xr_hidden,
+                                    (image2d-src_figure_xr_hidden).abs(),
+                                    (est_figure_ct_locked-est_figure_ct_locked_warped).abs(),
+                                    ], dim=-2).transpose(2, 3),                
+                        ], dim=-2)
+                grid = torchvision.utils.make_grid(res2d, normalize=False, scale_each=False, nrow=1, padding=0)
+                tensorboard.add_image(f'{stage}_residual', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
 
         info = {f'loss': loss}
         return info
