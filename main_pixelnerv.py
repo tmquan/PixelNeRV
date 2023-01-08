@@ -215,6 +215,8 @@ class PixelNeRVLightningModule(LightningModule):
         #     out_channels=2, 
         #     pretrained=True, 
         # )
+        init_weights(self.cam_settings, init_type='xavier', init_gain=0.02)
+    
         # Initialize the weights/bias with zeros (elev and azim) transformation
         self.cam_settings._fc.weight.data.zero_()
         self.cam_settings._fc.bias.data.zero_()
@@ -234,7 +236,7 @@ class PixelNeRVLightningModule(LightningModule):
             sh=self.sh, 
             pe=self.pe,
         )
-        init_weights(self.inv_renderer, init_type='normal', init_gain=0.02)
+        init_weights(self.inv_renderer, init_type='xavier', init_gain=0.02)
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
     def forward(self, figures, elev, azim):      
@@ -305,16 +307,16 @@ class PixelNeRVLightningModule(LightningModule):
             torch.split(
                 self.forward(
                     torch.cat([est_figure_ct_random, est_figure_ct_hidden,  src_figure_xr_hidden]), 
-                    torch.cat([est_elev_random, est_elev_hidden, est_elev_hidden]), 
-                    torch.cat([est_azim_random, est_azim_hidden, est_azim_hidden]), 
+                    torch.cat([src_elev_random, est_elev_hidden, est_elev_hidden]), 
+                    torch.cat([src_azim_random, est_azim_hidden, est_azim_hidden]), 
                 ),
                 self.batch_size
             )
 
-        rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_random)
+        rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_origin)
         rec_figure_ct_random_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_hidden)
         
-        rec_figure_ct_hidden_random = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, opacity=None, cameras=camera_random)
+        rec_figure_ct_hidden_random = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, opacity=None, cameras=camera_origin)
         rec_figure_ct_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, opacity=None, cameras=camera_hidden)
         
         est_figure_xr_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_xr_hidden, opacity=None, cameras=camera_hidden)
