@@ -265,9 +265,7 @@ class PixelNeRVLightningModule(LightningModule):
 
         # Construct the random camera
         dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
-        elev_random = torch.clamp(
-                            torch.randn(self.batch_size, device=_device), 
-                            min=-0.5, max=0.5) # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
+        elev_random = torch.randn(self.batch_size, device=_device) / 5.0 # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
         azim_random = torch.rand(self.batch_size, device=_device) # 0 1 -> 0 360
         R_random, T_random = look_at_view_transform(
             dist=dist_random, 
@@ -403,7 +401,7 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
         return [optimizer], [scheduler]
 
