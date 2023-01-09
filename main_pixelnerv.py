@@ -209,7 +209,7 @@ class PixelNeRVLightningModule(LightningModule):
             in_channels=1,
             num_classes=2,
         )
-
+        init_weights(self.cam_settings, init_type="normal")
         # Initialize the weights/bias with zeros (elev and azim) transformation
         self.cam_settings._fc.weight.data.zero_()
         self.cam_settings._fc.bias.data.zero_()
@@ -229,7 +229,7 @@ class PixelNeRVLightningModule(LightningModule):
             sh=self.sh, 
             pe=self.pe,
         )
-
+        init_weights(self.inv_renderer, init_type="normal")
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
     def forward(self, figures, elev, azim):      
@@ -247,18 +247,19 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
 
         # Construct the origin/random cameras
-        src_elev_origin = torch.randn(self.batch_size, device=_device) # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
-        src_azim_origin = torch.rand(self.batch_size, device=_device) # 0 1 -> 0 360
-        src_dist_origin = 4.0 * torch.ones(self.batch_size, device=_device)
-        R_origin, T_origin = look_at_view_transform(
-            dist=src_dist_origin.float(), 
-            elev=src_elev_origin.float() * 90, 
-            azim=src_azim_origin.float() * 360
+        src_elev_random = torch.randn(self.batch_size, device=_device) # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
+        src_azim_random = torch.rand(self.batch_size, device=_device) # 0 1 -> 0 360
+        src_elev_azim_random = torch.stack([src_elev_random, src_azim_random])
+        src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
+        R_random, T_random = look_at_view_transform(
+            dist=src_dist_random.float(), 
+            elev=src_elev_random.float() * 90, 
+            azim=src_azim_random.float() * 360
         )
-        camera_origin = FoVPerspectiveCameras(R=R_origin, T=T_origin, fov=45, aspect_ratio=1).to(_device)
+        camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
 
         # CT pathway
-        est_figure_ct_random = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_origin)
+        est_figure_ct_random = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_random)
         
         # XR pathway
         src_figure_xr_hidden = image2d
@@ -272,21 +273,20 @@ class PixelNeRVLightningModule(LightningModule):
             )
 
         est_elev_random, est_azim_random = torch.split(est_elev_azim_random, 1, dim=1)
-        est_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
-        R_random, T_random = look_at_view_transform(
-            dist=est_dist_random, 
-            elev=torch.remainder(est_elev_random.float(), 1) * 90, 
-            azim=torch.remainder(est_azim_random.float(), 1) * 360
-        )
-        camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
-
+        # est_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
+        # R_random, T_random = look_at_view_transform(
+        #     dist=est_dist_random.float(), 
+        #     elev=est_elev_random.float() * 90, 
+        #     azim=est_azim_random.float() * 360
+        # )
+        # camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
 
         est_elev_hidden, est_azim_hidden = torch.split(est_elev_azim_hidden, 1, dim=1)
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         R_hidden, T_hidden = look_at_view_transform(
-            dist=est_dist_hidden, 
-            elev=torch.remainder(est_elev_hidden.float(), 1) * 90, 
-            azim=torch.remainder(est_azim_hidden.float(), 1) * 360
+            dist=est_dist_hidden.float(), 
+            elev=est_elev_hidden.float() * 90, 
+            azim=est_azim_hidden.float() * 360
         )
         camera_hidden = FoVPerspectiveCameras(R=R_hidden, T=T_hidden, fov=45, aspect_ratio=1).to(_device)
 
@@ -320,14 +320,14 @@ class PixelNeRVLightningModule(LightningModule):
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_random) \
                   + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_hidden_hidden) 
 
-        view_loss = self.loss_smoothl1(src_elev_origin, est_elev_random) \
-                  + self.loss_smoothl1(src_azim_origin, est_azim_random)  
+        view_loss = self.loss_smoothl1(src_elev_random, est_elev_random) \
+                  + self.loss_smoothl1(src_azim_random, est_azim_random) 
 
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
 
-        loss = self.alpha*im3d_loss + self.gamma*im2d_loss + self.theta*view_loss
+        loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
 
         if batch_idx == 0:
             viz2d = torch.cat([
