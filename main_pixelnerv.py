@@ -265,7 +265,7 @@ class PixelNeRVLightningModule(LightningModule):
 
         # Construct the random camera
         dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
-        elev_random = torch.randn(self.batch_size, device=_device) / 5.0 # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
+        elev_random = torch.randn(self.batch_size, device=_device) / 4.0 # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
         azim_random = torch.rand(self.batch_size, device=_device) # 0 1 -> 0 360
         R_random, T_random = look_at_view_transform(
             dist=dist_random, 
@@ -462,7 +462,7 @@ if __name__ == "__main__":
             lr_callback,
             checkpoint_callback,
         ],
-        accumulate_grad_batches=4,
+        # accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         strategy="fsdp",  # "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16,  # if hparams.use_amp else 32,
