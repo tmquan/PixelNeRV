@@ -178,11 +178,11 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
         
         if self.sh > 0:
-            volumes = F.tanh( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
+            volumes = F.leaky_relu( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
         else:
-            volumes = F.tanh( results )
+            volumes = F.leaky_relu( results )
 
-        return volumes  
+        return volumes
         
 class PixelNeRVLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
@@ -235,8 +235,8 @@ class PixelNeRVLightningModule(LightningModule):
     def forward(self, figures, elev, azim):      
         return self.inv_renderer(torch.cat([figures * 2.0 - 1.0, 
                                             elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
-                                            azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
-                                            ], dim=1))
+                                            azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape), 
+                                            ], dim=1)) * 0.5 + 0.5
 
     def forward_camera(self, figures):   
         return F.tanh( self.cam_settings(figures * 2.0 - 1.0) )  
