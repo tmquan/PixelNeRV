@@ -235,7 +235,7 @@ class PixelNeRVLightningModule(LightningModule):
     def forward(self, figures, elev, azim):      
         return self.inv_renderer(torch.cat([figures, 
                                             elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape) * 0.5 + 0.5, # -1 1 to 0 1
-                                            azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
+                                            azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape) * 0.5 + 0.5, # -1 1 to 0 1
                                             ], dim=1))
 
     def forward_camera(self, figures):   
@@ -247,14 +247,14 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
 
         # Construct the origin/random cameras
-        src_elev_random = torch.randn(self.batch_size, device=_device) # -0.5 0.5 -> -45 45 ;   -1 1 -> -90 90
-        src_azim_random = torch.rand(self.batch_size, device=_device) # 0 1 -> 0 360
-        src_elev_azim_random = torch.stack([src_elev_random, src_azim_random])
+        src_elev_random = torch.randn(self.batch_size, device=_device) / 2  # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
+        src_azim_random = torch.randn(self.batch_size, device=_device) / 1  #  0   1    -> 0 180
+        # src_elev_azim_random = torch.stack([src_elev_random, src_azim_random])
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         R_random, T_random = look_at_view_transform(
             dist=src_dist_random.float(), 
             elev=src_elev_random.float() * 90, 
-            azim=src_azim_random.float() * 360
+            azim=src_azim_random.float() * 180
         )
         camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
 
@@ -277,7 +277,7 @@ class PixelNeRVLightningModule(LightningModule):
         # R_random, T_random = look_at_view_transform(
         #     dist=est_dist_random.float(), 
         #     elev=est_elev_random.float() * 90, 
-        #     azim=est_azim_random.float() * 360
+        #     azim=est_azim_random.float() * 180
         # )
         # camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
 
@@ -286,7 +286,7 @@ class PixelNeRVLightningModule(LightningModule):
         R_hidden, T_hidden = look_at_view_transform(
             dist=est_dist_hidden.float(), 
             elev=est_elev_hidden.float() * 90, 
-            azim=est_azim_hidden.float() * 360
+            azim=est_azim_hidden.float() * 180
         )
         camera_hidden = FoVPerspectiveCameras(R=R_hidden, T=T_hidden, fov=45, aspect_ratio=1).to(_device)
 
@@ -377,7 +377,7 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
         return [optimizer], [scheduler]
 
