@@ -178,9 +178,9 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
         
         if self.sh > 0:
-            volumes = F.relu( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
+            volumes = F.tanh( results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) )
         else:
-            volumes = F.relu( results )
+            volumes = F.tanh( results )
 
         return volumes  
         
@@ -233,13 +233,13 @@ class PixelNeRVLightningModule(LightningModule):
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
     def forward(self, figures, elev, azim):      
-        return self.inv_renderer(torch.cat([figures, 
-                                            elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape) * 0.5 + 0.5, # -1 1 to 0 1
-                                            azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape) * 0.5 + 0.5, # -1 1 to 0 1
+        return self.inv_renderer(torch.cat([figures * 2.0 - 1.0, 
+                                            elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
+                                            azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
                                             ], dim=1))
 
     def forward_camera(self, figures):   
-        return self.cam_settings(figures)   
+        return F.tanh( self.cam_settings(figures * 2.0 - 1.0) )  
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
