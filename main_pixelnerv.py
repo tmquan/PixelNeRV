@@ -206,10 +206,11 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.cam_settings = EfficientNetBN(
             model_name="efficientnet-b7", #(32, 48, 80, 224, 640, 800)
+            pretrained=True, 
             in_channels=1,
             num_classes=2,
         )
-        init_weights(self.cam_settings, init_type="normal")
+        # init_weights(self.cam_settings, init_type="normal")
         # Initialize the weights/bias with zeros (elev and azim) transformation
         self.cam_settings._fc.weight.data.zero_()
         self.cam_settings._fc.bias.data.zero_()
@@ -229,7 +230,7 @@ class PixelNeRVLightningModule(LightningModule):
             sh=self.sh, 
             pe=self.pe,
         )
-        init_weights(self.inv_renderer, init_type="normal")
+        # init_weights(self.inv_renderer, init_type="normal")
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
     def forward(self, figures, elev, azim):      
@@ -248,8 +249,8 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
         
         # Construct the random cameras
-        src_elev_random = torch.randn(self.batch_size, device=_device) / 2  # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
-        src_azim_random = torch.randn(self.batch_size, device=_device) / 1  #  0   1    -> 0 180
+        src_elev_random = torch.randn(self.batch_size, device=_device) # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
+        src_azim_random = torch.randn(self.batch_size, device=_device) #  0   1    -> 0 180
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         R_random, T_random = look_at_view_transform(
             dist=src_dist_random.float(), 
@@ -263,14 +264,14 @@ class PixelNeRVLightningModule(LightningModule):
         # Estimate camera_hidden pose for XR
         src_figure_xr_hidden = image2d
         
-        # est_elev_random, est_azim_random = self.forward_camera(est_figure_ct_random)
-        # est_elev_hidden, est_azim_hidden = self.forward_camera(src_figure_xr_hidden)
-        est_elev_random_hidden, est_azim_random_hidden = \
-            self.forward_camera(
-                torch.cat([est_figure_ct_random, src_figure_xr_hidden]), 
-            )
-        est_elev_random, est_elev_hidden = torch.split(est_elev_random_hidden, self.batch_size)
-        est_azim_random, est_azim_hidden = torch.split(est_azim_random_hidden, self.batch_size)
+        est_elev_random, est_azim_random = self.forward_camera(est_figure_ct_random)
+        est_elev_hidden, est_azim_hidden = self.forward_camera(src_figure_xr_hidden)
+        # est_elev_random_hidden, est_azim_random_hidden = \
+        #     self.forward_camera(
+        #         torch.cat([est_figure_ct_random, src_figure_xr_hidden]), 
+        #     )
+        # est_elev_random, est_elev_hidden = torch.split(est_elev_random_hidden, self.batch_size)
+        # est_azim_random, est_azim_hidden = torch.split(est_azim_random_hidden, self.batch_size)
 
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         R_hidden, T_hidden = look_at_view_transform(
@@ -283,28 +284,36 @@ class PixelNeRVLightningModule(LightningModule):
         est_figure_ct_hidden = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_hidden)
 
         # Jointly estimate the volumes
-        # est_volume_ct_random = self.forward(est_figure_ct_random, est_elev_random, est_azim_random)
-        # est_volume_xr_hidden = self.forward(src_figure_xr_hidden, est_elev_hidden, est_azim_hidden)
-        est_volume_ct_random, est_volume_xr_hidden = \
-            torch.split(
-                self.forward(
-                    torch.cat([est_figure_ct_random,  src_figure_xr_hidden]), 
-                    torch.cat([est_elev_random, est_elev_hidden]), 
-                    torch.cat([est_azim_random, est_azim_hidden]), 
-                ),
-                self.batch_size
-            )
+        est_volume_ct_random = self.forward(est_figure_ct_random, est_elev_random, est_azim_random)
+        est_volume_ct_hidden = self.forward(est_figure_ct_hidden, est_elev_hidden, est_azim_hidden)
+        est_volume_xr_hidden = self.forward(src_figure_xr_hidden, est_elev_hidden, est_azim_hidden)
+        # est_volume_ct_random, est_volume_xr_hidden = \
+        #     torch.split(
+        #         self.forward(
+        #             torch.cat([est_figure_ct_random,  src_figure_xr_hidden]), 
+        #             torch.cat([est_elev_random, est_elev_hidden]), 
+        #             torch.cat([est_azim_random, est_azim_hidden]), 
+        #         ),
+        #         self.batch_size
+        #     )
 
         # Reconstruct the appropriate XR
+        rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_random)
         rec_figure_ct_random_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_hidden)
+        rec_figure_ct_hidden_random = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, opacity=None, cameras=camera_random)
+        rec_figure_ct_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, opacity=None, cameras=camera_hidden)
         rec_figure_xr_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_xr_hidden, opacity=None, cameras=camera_hidden)
         
         rec_elev_hidden, rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
         
         # Compute the loss
-        im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random.sum(dim=1, keepdim=True)) 
+        im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random.sum(dim=1, keepdim=True)) \
+                  + self.loss_smoothl1(image3d, est_volume_ct_hidden.sum(dim=1, keepdim=True)) 
 
         im2d_loss = self.loss_smoothl1(est_figure_ct_hidden, rec_figure_ct_random_hidden) \
+                  + self.loss_smoothl1(est_figure_ct_hidden, rec_figure_ct_hidden_hidden) \
+                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_random) \
+                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_hidden_random) \
                   + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_hidden_hidden) 
 
         view_loss = self.loss_smoothl1(src_elev_random, est_elev_random) \
