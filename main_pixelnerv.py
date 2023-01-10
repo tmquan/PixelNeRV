@@ -249,7 +249,7 @@ class PixelNeRVLightningModule(LightningModule):
         # Construct the origin/random cameras
         src_elev_random = torch.randn(self.batch_size, device=_device) / 2  # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
         src_azim_random = torch.randn(self.batch_size, device=_device) / 1  #  0   1    -> 0 180
-        # src_elev_azim_random = torch.stack([src_elev_random, src_azim_random])
+        src_elev_azim_random = torch.stack([src_elev_random, src_azim_random])
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         R_random, T_random = look_at_view_transform(
             dist=src_dist_random.float(), 
@@ -320,8 +320,8 @@ class PixelNeRVLightningModule(LightningModule):
                   + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_random) \
                   + self.loss_smoothl1(src_figure_xr_hidden, est_figure_xr_hidden_hidden) 
 
-        view_loss = self.loss_smoothl1(src_elev_random, est_elev_random) \
-                  + self.loss_smoothl1(src_azim_random, est_azim_random) 
+        view_loss = self.loss_smoothl1(src_elev_azim_random, est_elev_azim_random) \
+                  + self.loss_smoothl1(est_elev_azim_hidden, torch.zeros_like(est_elev_azim_hidden)) # Regularized cam_hidden
 
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
