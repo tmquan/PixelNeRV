@@ -306,9 +306,10 @@ class PixelNeRVLightningModule(LightningModule):
         view_loss = self.loss_smoothl1(src_elev_random, est_elev_random) \
                   + self.loss_smoothl1(src_azim_random, est_azim_random) \
                   + self.loss_smoothl1(est_elev_hidden, rec_elev_hidden) \
-                  + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) \
-                  + est_elev_hidden.abs().mean() \
-                  + est_azim_hidden.abs().mean()
+                  + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) 
+                  
+                #   + est_elev_hidden.abs().mean() 
+                #   + est_azim_hidden.abs().mean()
                     
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
