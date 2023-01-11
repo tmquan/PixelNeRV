@@ -110,7 +110,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                norm=Norm.BATCH,
+                # norm=Norm.BATCH,
                 # dropout=0.4,
             ),
             Reshape(*[1, shape, shape, shape]),
@@ -127,7 +127,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                norm=Norm.BATCH,
+                # norm=Norm.BATCH,
                 # dropout=0.4,
             ),
         )
@@ -143,7 +143,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                norm=Norm.BATCH,
+                # norm=Norm.BATCH,
                 # dropout=0.4,
             ),
         )
@@ -159,7 +159,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                norm=Norm.BATCH,
+                # norm=Norm.BATCH,
                 # dropout=0.4,
             ), 
         )
@@ -291,7 +291,8 @@ class PixelNeRVLightningModule(LightningModule):
         rec_figure_ct_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, opacity=None, cameras=camera_hidden)
         rec_figure_xr_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_xr_hidden, opacity=None, cameras=camera_hidden)
         
-        rec_elev_hidden, rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
+        rec_elev_hidden, \
+        rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
         
         # Compute the loss
         im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random.sum(dim=1, keepdim=True)) \
@@ -306,10 +307,11 @@ class PixelNeRVLightningModule(LightningModule):
         view_loss = self.loss_smoothl1(src_elev_random, est_elev_random) \
                   + self.loss_smoothl1(src_azim_random, est_azim_random) \
                   + self.loss_smoothl1(est_elev_hidden, rec_elev_hidden) \
-                  + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) 
-                  
-                #   + est_elev_hidden.abs().mean() 
-                #   + est_azim_hidden.abs().mean()
+                  + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) \
+                  + est_elev_hidden.abs().mean() \
+                  + est_azim_hidden.abs().mean() \
+                  + rec_elev_hidden.abs().mean() \
+                  + rec_azim_hidden.abs().mean() 
                     
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
