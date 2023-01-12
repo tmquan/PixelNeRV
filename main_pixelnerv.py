@@ -248,6 +248,10 @@ class PixelNeRVLightningModule(LightningModule):
         image3d = batch["image3d"]
         image2d = batch["image2d"]
         
+        # Construct the hidden cameras
+        src_elev_hidden = torch.zeros(self.batch_size, device=_device) 
+        src_azim_hidden = torch.zeros(self.batch_size, device=_device) 
+        
         # Construct the random cameras
         src_elev_random = torch.randn(self.batch_size, device=_device) # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
         src_azim_random = torch.randn(self.batch_size, device=_device) #  0   1    -> 0 180
@@ -308,11 +312,11 @@ class PixelNeRVLightningModule(LightningModule):
                   + self.loss_smoothl1(src_azim_random, est_azim_random) \
                   + self.loss_smoothl1(est_elev_hidden, rec_elev_hidden) \
                   + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) \
-                  + est_elev_hidden.abs().mean() \
-                  + est_azim_hidden.abs().mean() \
-                  + rec_elev_hidden.abs().mean() \
-                  + rec_azim_hidden.abs().mean() 
-                    
+                  + self.loss_smoothl1(src_elev_hidden, est_elev_hidden) \
+                  + self.loss_smoothl1(src_azim_hidden, est_azim_hidden) \
+                  + self.loss_smoothl1(src_elev_hidden, rec_elev_hidden) \
+                  + self.loss_smoothl1(src_azim_hidden, rec_azim_hidden) 
+   
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
