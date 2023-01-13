@@ -75,8 +75,11 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         self.shape = shape
 
         if self.pe>0:
-            self.encoder_net = PositionalEncodingPermute3D(self.pe) # 8
+            encoder_net = PositionalEncodingPermute3D(self.pe) # 8
             pe_channels = self.pe
+            pos_enc = torch.ones([1, self.pe, self.shape, self.shape, self.shape])
+            encoded = encoder_net(pos_enc)
+            self.register_buffer('encoded', encoded)
         else:
             pe_channels = 0
 
@@ -98,7 +101,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 ValueError("Spherical Harmonics only support 2 and 3 degree")
             # torch.Size([100, 100, 100, 9 or 16])
             self.register_buffer('shbasis', shw.unsqueeze(0).permute(0, 4, 1, 2, 3))
-
+            
         self.clarity_net = nn.Sequential(
             Unet(
                 spatial_dims=2,
@@ -167,11 +170,12 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
     def forward(self, figures, norm_type="standardized"):
         clarity = self.clarity_net(figures)
         if self.pe > 0:
-            pos_enc = torch.zeros((clarity.shape[0], self.pe, clarity.shape[2], clarity.shape[3], clarity.shape[3]), device=clarity.device)
-            encoded = self.encoder_net(pos_enc)
-            density = self.density_net(torch.cat([encoded, clarity], dim=1))
-            mixture = self.mixture_net(torch.cat([encoded, clarity, density], dim=1))
-            results = self.refiner_net(torch.cat([encoded, clarity, density, mixture], dim=1))
+            # pos_enc = torch.ones((clarity.shape[0], self.pe, self.shape, self.shape, self.shape), device=clarity.device)
+            # encoded = self.encoder_net(pos_enc)
+            # print(self.encoded.shape)
+            density = self.density_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity], dim=1))
+            mixture = self.mixture_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity, density], dim=1))
+            results = self.refiner_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity, density, mixture], dim=1))
         else:
             density = self.density_net(torch.cat([clarity], dim=1))
             mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
@@ -234,10 +238,11 @@ class PixelNeRVLightningModule(LightningModule):
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
     def forward(self, figures, elev, azim):      
-        return self.inv_renderer(torch.cat([figures * 2.0 - 1.0, 
-                                            elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
-                                            azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape), 
-                                            ], dim=1)) 
+        return F.tanh(
+                    self.inv_renderer(torch.cat([figures * 2.0 - 1.0, 
+                                                 elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
+                                                 azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape), 
+                                                ], dim=1)) ) * 0.5 + 0.5
 
     def forward_camera(self, figures):   
         elev_azim = self.cam_settings(figures * 2.0 - 1.0) 
@@ -247,10 +252,6 @@ class PixelNeRVLightningModule(LightningModule):
         _device = batch["image3d"].device
         image3d = batch["image3d"]
         image2d = batch["image2d"]
-        
-        # Construct the hidden cameras
-        src_elev_hidden = torch.zeros(self.batch_size, device=_device) 
-        src_azim_hidden = torch.zeros(self.batch_size, device=_device) 
         
         # Construct the random cameras
         src_elev_random = torch.randn(self.batch_size, device=_device) # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
@@ -262,6 +263,10 @@ class PixelNeRVLightningModule(LightningModule):
             azim=src_azim_random.float() * 180
         )
         camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
+        
+        # Construct the hidden cameras
+        src_elev_hidden = torch.zeros(self.batch_size, device=_device) 
+        src_azim_hidden = torch.zeros(self.batch_size, device=_device) 
         
         # Estimate camera_hidden pose for XR
         src_figure_xr_hidden = image2d
@@ -299,8 +304,8 @@ class PixelNeRVLightningModule(LightningModule):
         rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
         
         # Compute the loss
-        im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random.sum(dim=1, keepdim=True)) \
-                  + self.loss_smoothl1(image3d, est_volume_ct_hidden.sum(dim=1, keepdim=True)) 
+        im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random.mean(dim=1, keepdim=True)) \
+                  + self.loss_smoothl1(image3d, est_volume_ct_hidden.mean(dim=1, keepdim=True)) 
 
         im2d_loss = self.loss_smoothl1(est_figure_ct_hidden, rec_figure_ct_random_hidden) \
                   + self.loss_smoothl1(est_figure_ct_hidden, rec_figure_ct_hidden_hidden) \
@@ -328,7 +333,7 @@ class PixelNeRVLightningModule(LightningModule):
                         torch.cat([image3d[..., self.shape//2, :], 
                                    est_figure_ct_hidden,
                                    est_figure_ct_random,
-                                   est_volume_ct_hidden.sum(dim=1, keepdim=True)[..., self.shape//2, :],
+                                   est_volume_ct_hidden.mean(dim=1, keepdim=True)[..., self.shape//2, :],
                                    ], dim=-2).transpose(2, 3),
                         torch.cat([rec_figure_ct_hidden_hidden,
                                    rec_figure_ct_hidden_random,
@@ -337,7 +342,7 @@ class PixelNeRVLightningModule(LightningModule):
                                    ], dim=-2).transpose(2, 3),
                         torch.cat([image2d, 
                                    src_figure_xr_hidden,
-                                   est_volume_xr_hidden.sum(dim=1, keepdim=True)[..., self.shape//2, :],
+                                   est_volume_xr_hidden.mean(dim=1, keepdim=True)[..., self.shape//2, :],
                                    rec_figure_xr_hidden_hidden,
                                    ], dim=-2).transpose(2, 3),
                     ], dim=-2)
