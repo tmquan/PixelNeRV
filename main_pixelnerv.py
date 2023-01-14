@@ -189,6 +189,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         return volumes
 
 def mean_and_tanh(x, eps=1e-8): return ( F.tanh(x.mean(dim=1, keepdim=True)) * 0.5 + 0.5 )  
+def mean_and_relu(x, eps=1e-8): return ( F.relu(x.mean(dim=1, keepdim=True)) )  
 
 class PixelNeRVLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
@@ -295,20 +296,28 @@ class PixelNeRVLightningModule(LightningModule):
         est_volume_xr_hidden = self.forward(src_figure_xr_hidden, est_elev_hidden, est_azim_hidden)
 
         # Reconstruct the appropriate XR
-        rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_random)
-        rec_figure_ct_random_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_random, opacity=None, cameras=camera_hidden)
-        rec_figure_ct_hidden_random = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, opacity=None, cameras=camera_random)
-        rec_figure_ct_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, opacity=None, cameras=camera_hidden)
-        rec_figure_xr_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_xr_hidden, opacity=None, cameras=camera_hidden)
+        rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, norm_type=None, opacity=None, cameras=camera_random)
+        rec_figure_ct_random_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_random, norm_type=None, opacity=None, cameras=camera_hidden)
+        rec_figure_ct_hidden_random = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, norm_type=None, opacity=None, cameras=camera_random)
+        rec_figure_ct_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, norm_type=None, opacity=None, cameras=camera_hidden)
+        rec_figure_xr_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_xr_hidden, norm_type=None, opacity=None, cameras=camera_hidden)
         
         rec_elev_hidden, \
         rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
         
+        # Rescale the volume range
+        est_volume_ct_random = mean_and_relu(est_volume_ct_random) 
+        est_volume_ct_hidden = mean_and_relu(est_volume_ct_hidden) 
+        est_volume_xr_hidden = mean_and_relu(est_volume_xr_hidden) 
+
+        rec_figure_ct_random_random = mean_and_relu(rec_figure_ct_random_random) 
+        rec_figure_ct_random_hidden = mean_and_relu(rec_figure_ct_random_hidden) 
+        rec_figure_ct_hidden_random = mean_and_relu(rec_figure_ct_hidden_random) 
+        rec_figure_ct_hidden_hidden = mean_and_relu(rec_figure_ct_hidden_hidden) 
+        rec_figure_xr_hidden_hidden = mean_and_relu(rec_figure_xr_hidden_hidden) 
+
+
         # Compute the loss
-        est_volume_ct_random = mean_and_tanh(est_volume_ct_random) # Rescale the volume range
-        est_volume_ct_hidden = mean_and_tanh(est_volume_ct_hidden) # Rescale the volume range
-        est_volume_xr_hidden = mean_and_tanh(est_volume_xr_hidden) # Rescale the volume range
-        
         im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random) \
                   + self.loss_smoothl1(image3d, est_volume_ct_hidden) 
 
