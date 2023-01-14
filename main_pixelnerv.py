@@ -187,7 +187,9 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             volumes = results 
 
         return volumes
-        
+
+def mean_and_tanh(x, eps=1e-8): return ( F.tanh(x.mean(dim=1, keepdim=True)) * 0.5 + 0.5 )  
+
 class PixelNeRVLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
         super().__init__()
@@ -238,11 +240,10 @@ class PixelNeRVLightningModule(LightningModule):
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
     def forward(self, figures, elev, azim):      
-        return F.tanh(
-                    self.inv_renderer(torch.cat([figures * 2.0 - 1.0, 
-                                                 elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
-                                                 azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape), 
-                                                ], dim=1)) ) * 0.5 + 0.5
+        return self.inv_renderer(torch.cat([figures * 2.0 - 1.0, 
+                                            elev.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape),
+                                            azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape), 
+                                        ], dim=1)) 
 
     def forward_camera(self, figures):   
         elev_azim = self.cam_settings(figures * 2.0 - 1.0) 
@@ -304,8 +305,12 @@ class PixelNeRVLightningModule(LightningModule):
         rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
         
         # Compute the loss
-        im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random.mean(dim=1, keepdim=True)) \
-                  + self.loss_smoothl1(image3d, est_volume_ct_hidden.mean(dim=1, keepdim=True)) 
+        est_volume_ct_random = mean_and_tanh(est_volume_ct_random) # Rescale the volume range
+        est_volume_ct_hidden = mean_and_tanh(est_volume_ct_hidden) # Rescale the volume range
+        est_volume_xr_hidden = mean_and_tanh(est_volume_xr_hidden) # Rescale the volume range
+        
+        im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random) \
+                  + self.loss_smoothl1(image3d, est_volume_ct_hidden) 
 
         im2d_loss = self.loss_smoothl1(est_figure_ct_hidden, rec_figure_ct_random_hidden) \
                   + self.loss_smoothl1(est_figure_ct_hidden, rec_figure_ct_hidden_hidden) \
@@ -333,7 +338,7 @@ class PixelNeRVLightningModule(LightningModule):
                         torch.cat([image3d[..., self.shape//2, :], 
                                    est_figure_ct_hidden,
                                    est_figure_ct_random,
-                                   est_volume_ct_hidden.mean(dim=1, keepdim=True)[..., self.shape//2, :],
+                                   est_volume_ct_hidden[..., self.shape//2, :],
                                    ], dim=-2).transpose(2, 3),
                         torch.cat([rec_figure_ct_hidden_hidden,
                                    rec_figure_ct_hidden_random,
@@ -342,7 +347,7 @@ class PixelNeRVLightningModule(LightningModule):
                                    ], dim=-2).transpose(2, 3),
                         torch.cat([image2d, 
                                    src_figure_xr_hidden,
-                                   est_volume_xr_hidden.mean(dim=1, keepdim=True)[..., self.shape//2, :],
+                                   est_volume_xr_hidden[..., self.shape//2, :],
                                    rec_figure_xr_hidden_hidden,
                                    ], dim=-2).transpose(2, 3),
                     ], dim=-2)
