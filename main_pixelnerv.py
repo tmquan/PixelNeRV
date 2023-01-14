@@ -302,8 +302,8 @@ class PixelNeRVLightningModule(LightningModule):
         rec_figure_ct_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, norm_type=None, opacity=None, cameras=camera_hidden)
         rec_figure_xr_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_xr_hidden, norm_type=None, opacity=None, cameras=camera_hidden)
         
-        rec_elev_hidden, \
-        rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
+        # rec_elev_hidden, \
+        # rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
         
         # Rescale the volume range
         est_volume_ct_random = mean_and_relu(est_volume_ct_random) 
@@ -328,9 +328,10 @@ class PixelNeRVLightningModule(LightningModule):
                   + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_hidden_hidden) 
 
         view_loss = self.loss_smoothl1(src_elev_random, est_elev_random) \
-                  + self.loss_smoothl1(src_azim_random, est_azim_random) \
-                  + self.loss_smoothl1(est_elev_hidden, rec_elev_hidden) \
-                  + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) 
+                  + self.loss_smoothl1(src_azim_random, est_azim_random) 
+                  
+                #   + self.loss_smoothl1(est_elev_hidden, rec_elev_hidden) \
+                #   + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) 
                 #   + self.loss_smoothl1(src_elev_hidden, est_elev_hidden) \
                 #   + self.loss_smoothl1(src_azim_hidden, est_azim_hidden) \
                 #   + self.loss_smoothl1(src_elev_hidden, rec_elev_hidden) \
