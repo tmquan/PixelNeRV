@@ -321,9 +321,9 @@ class PixelNeRVLightningModule(LightningModule):
         # rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
         
         # Perform Post activation like DVGO
-        est_volume_ct_random = mean_and_relu(est_volume_ct_random) 
-        est_volume_ct_hidden = mean_and_relu(est_volume_ct_hidden) 
-        est_volume_xr_hidden = mean_and_relu(est_volume_xr_hidden) 
+        est_volume_ct_random = mean_and_tanh(est_volume_ct_random) 
+        est_volume_ct_hidden = mean_and_tanh(est_volume_ct_hidden) 
+        est_volume_xr_hidden = mean_and_tanh(est_volume_xr_hidden) 
 
         rec_figure_ct_random_random = mean_and_relu(rec_figure_ct_random_random) 
         rec_figure_ct_random_hidden = mean_and_relu(rec_figure_ct_random_hidden) 
