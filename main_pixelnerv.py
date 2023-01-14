@@ -113,7 +113,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # norm=Norm.BATCH,
+                norm=Norm.BATCH,
                 # dropout=0.4,
             ),
             Reshape(*[1, shape, shape, shape]),
@@ -130,7 +130,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # norm=Norm.BATCH,
+                norm=Norm.BATCH,
                 # dropout=0.4,
             ),
         )
@@ -146,7 +146,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # norm=Norm.BATCH,
+                norm=Norm.BATCH,
                 # dropout=0.4,
             ),
         )
@@ -162,7 +162,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # norm=Norm.BATCH,
+                norm=Norm.BATCH,
                 # dropout=0.4,
             ), 
         )
@@ -266,15 +266,26 @@ class PixelNeRVLightningModule(LightningModule):
         )
         camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
         
-        # Construct the hidden cameras
-        src_elev_hidden = torch.zeros(self.batch_size, device=_device) 
-        src_azim_hidden = torch.zeros(self.batch_size, device=_device) 
+        # # Construct the hidden cameras
+        # src_elev_hidden = torch.zeros(self.batch_size, device=_device) 
+        # src_azim_hidden = torch.zeros(self.batch_size, device=_device) 
         
+        # Construct the 2 CT projections
+        est_figure_ct_random = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_random)
+
         # Estimate camera_hidden pose for XR
         src_figure_xr_hidden = image2d
         
-        est_elev_hidden, \
-        est_azim_hidden = self.forward_camera(src_figure_xr_hidden)
+        # est_elev_random, \
+        # est_azim_random = self.forward_camera(est_figure_ct_random)
+        # est_elev_hidden, \
+        # est_azim_hidden = self.forward_camera(src_figure_xr_hidden)
+        est_elev, est_azim = self.forward_camera(
+            torch.cat([est_figure_ct_random, 
+                       src_figure_xr_hidden])
+        )    
+        est_elev_random, est_elev_hidden = torch.split(est_elev, 1)
+        est_azim_random, est_azim_hidden = torch.split(est_azim, 1)
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         R_hidden, T_hidden = look_at_view_transform(
             dist=est_dist_hidden.float(), 
@@ -283,17 +294,21 @@ class PixelNeRVLightningModule(LightningModule):
         )
         camera_hidden = FoVPerspectiveCameras(R=R_hidden, T=T_hidden, fov=45, aspect_ratio=1).to(_device)
 
-        # Construct the 2 CT projections
-        est_figure_ct_random = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_random)
         est_figure_ct_hidden = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_hidden)
-
-        est_elev_random, \
-        est_azim_random = self.forward_camera(est_figure_ct_random)
         
         # Jointly estimate the volumes
-        est_volume_ct_random = self.forward(est_figure_ct_random, est_elev_random, est_azim_random)
-        est_volume_ct_hidden = self.forward(est_figure_ct_hidden, est_elev_hidden, est_azim_hidden)
-        est_volume_xr_hidden = self.forward(src_figure_xr_hidden, est_elev_hidden, est_azim_hidden)
+        # est_volume_ct_random = self.forward(est_figure_ct_random, est_elev_random, est_azim_random)
+        # est_volume_ct_hidden = self.forward(est_figure_ct_hidden, est_elev_hidden, est_azim_hidden)
+        # est_volume_xr_hidden = self.forward(src_figure_xr_hidden, est_elev_hidden, est_azim_hidden)
+        est_volume_ct_random, \
+        est_volume_ct_hidden, \
+        est_volume_xr_hidden = torch.split(
+            self.forward(
+                torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden]),
+                torch.cat([est_elev_random, est_elev_hidden, est_elev_hidden]),
+                torch.cat([est_azim_random, est_azim_hidden, est_azim_hidden]),
+            ), self.batch_size
+        )    
 
         # Reconstruct the appropriate XR
         rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, norm_type=None, opacity=None, cameras=camera_random)
@@ -305,7 +320,7 @@ class PixelNeRVLightningModule(LightningModule):
         # rec_elev_hidden, \
         # rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
         
-        # Rescale the volume range
+        # Perform Post activation like DVGO
         est_volume_ct_random = mean_and_relu(est_volume_ct_random) 
         est_volume_ct_hidden = mean_and_relu(est_volume_ct_hidden) 
         est_volume_xr_hidden = mean_and_relu(est_volume_xr_hidden) 
