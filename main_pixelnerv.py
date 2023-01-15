@@ -266,12 +266,23 @@ class PixelNeRVLightningModule(LightningModule):
         )
         camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
         
+        src_elev_locked = torch.zeros(self.batch_size, device=_device) # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
+        src_azim_locked = torch.zeros(self.batch_size, device=_device) #  0   1    -> 0 180
+        src_dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
+        R_locked, T_locked = look_at_view_transform(
+            dist=src_dist_locked.float(), 
+            elev=src_elev_locked.float() * 90, 
+            azim=src_azim_locked.float() * 180
+        )
+        camera_locked = FoVPerspectiveCameras(R=R_locked, T=T_locked, fov=45, aspect_ratio=1).to(_device)
+        
         # # Construct the hidden cameras
         # src_elev_hidden = torch.zeros(self.batch_size, device=_device) 
         # src_azim_hidden = torch.zeros(self.batch_size, device=_device) 
         
         # Construct the 2 CT projections
         est_figure_ct_random = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_random)
+        est_figure_ct_locked = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_locked)
 
         # Estimate camera_hidden pose for XR
         src_figure_xr_hidden = image2d
@@ -281,11 +292,10 @@ class PixelNeRVLightningModule(LightningModule):
         # est_elev_hidden, \
         # est_azim_hidden = self.forward_camera(src_figure_xr_hidden)
         est_elev, est_azim = self.forward_camera(
-            torch.cat([est_figure_ct_random, 
-                       src_figure_xr_hidden])
+            torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden])
         )    
-        est_elev_random, est_elev_hidden = torch.split(est_elev, 1)
-        est_azim_random, est_azim_hidden = torch.split(est_azim, 1)
+        est_elev_random, est_elev_locked, est_elev_hidden = torch.split(est_elev, 1)
+        est_azim_random, est_azim_locked, est_azim_hidden = torch.split(est_azim, 1)
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         R_hidden, T_hidden = look_at_view_transform(
             dist=est_dist_hidden.float(), 
@@ -343,7 +353,9 @@ class PixelNeRVLightningModule(LightningModule):
                   + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_hidden_hidden) 
 
         view_loss = self.loss_smoothl1(src_elev_random, est_elev_random) \
-                  + self.loss_smoothl1(src_azim_random, est_azim_random) 
+                  + self.loss_smoothl1(src_azim_random, est_azim_random) \
+                  + self.loss_smoothl1(src_elev_locked, est_elev_locked) \
+                  + self.loss_smoothl1(src_azim_locked, est_azim_locked) 
                   
                 #   + self.loss_smoothl1(est_elev_hidden, rec_elev_hidden) \
                 #   + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) 
