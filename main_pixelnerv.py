@@ -307,7 +307,7 @@ class PixelNeRVLightningModule(LightningModule):
             camera_hidden = FoVPerspectiveCameras(R=R_hidden, T=T_hidden, fov=45, aspect_ratio=1).to(_device)
         else:
             camera_hidden = camera_locked
-            
+
         est_figure_ct_hidden = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_hidden)
         
         # Jointly estimate the volumes
@@ -371,8 +371,13 @@ class PixelNeRVLightningModule(LightningModule):
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-
-        loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
+        
+        if optimizer_idx==0:
+            loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
+        elif optimizer_idx==1:
+            loss = self.theta*view_loss
+        else:
+            loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
 
         if batch_idx == 0:
             viz2d = torch.cat([
@@ -395,11 +400,14 @@ class PixelNeRVLightningModule(LightningModule):
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
             tensorboard = self.logger.experiment
             tensorboard.add_image(f'{stage}_samples', grid.clamp(0., 1.), self.current_epoch*self.batch_size + batch_idx)
+            
         info = {f'loss': loss}
         return info
 
-    def training_step(self, batch, batch_idx):
-        return self._common_step(batch, batch_idx, optimizer_idx=0, stage='train')
+    # def training_step(self, batch, batch_idx):
+    #     return self._common_step(batch, batch_idx, optimizer_idx=0, stage='train')
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        return self._common_step(batch, batch_idx, optimizer_idx, stage='train')
 
     def validation_step(self, batch, batch_idx):
         return self._common_step(batch, batch_idx, optimizer_idx=0, stage='validation')
@@ -421,9 +429,14 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
-        return [optimizer], [scheduler]
+        # optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
+        # return [optimizer], [scheduler]
+        opt_inv = torch.optim.RAdam(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        opt_cam = torch.optim.RAdam(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
+        sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
+        return [opt_inv, opt_cam], [sch_inv, sch_cam]
 
 
 if __name__ == "__main__":
