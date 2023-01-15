@@ -196,6 +196,7 @@ class PixelNeRVLightningModule(LightningModule):
         super().__init__()
         self.logsdir = hparams.logsdir
         self.lr = hparams.lr
+        self.cam = hparams.cam
         self.shape = hparams.shape
         self.alpha = hparams.alpha
         self.gamma = hparams.gamma
@@ -302,8 +303,11 @@ class PixelNeRVLightningModule(LightningModule):
             elev=est_elev_hidden.float() * 90, 
             azim=est_azim_hidden.float() * 180
         )
-        camera_hidden = FoVPerspectiveCameras(R=R_hidden, T=T_hidden, fov=45, aspect_ratio=1).to(_device)
-
+        if self.cam:
+            camera_hidden = FoVPerspectiveCameras(R=R_hidden, T=T_hidden, fov=45, aspect_ratio=1).to(_device)
+        else:
+            camera_hidden = camera_locked
+            
         est_figure_ct_hidden = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_hidden)
         
         # Jointly estimate the volumes
@@ -438,6 +442,8 @@ if __name__ == "__main__":
     parser.add_argument("--st", type=int, default=1, help="with spatial transformer network")
     parser.add_argument("--sh", type=int, default=0, help="degree of spherical harmonic (2, 3)")
     parser.add_argument("--pe", type=int, default=0, help="positional encoding (0 - 8)")
+    
+    parser.add_argument("--cam", action="store_true", help="train cam hidden or locked")
     
     parser.add_argument("--alpha", type=float, default=1., help="vol loss")
     parser.add_argument("--gamma", type=float, default=1., help="img loss")
