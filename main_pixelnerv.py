@@ -192,8 +192,8 @@ def mean_and_tanh(x, eps=1e-8): return ( F.tanh(x.mean(dim=1, keepdim=True)) * 0
 def mean_and_relu(x, eps=1e-8): return ( F.relu(x.mean(dim=1, keepdim=True)) )  
 def mean_and_norm(x, eps=1e-8): 
     x = x.mean(dim=1, keepdim=True)
-    # x = ( x - x.mean()) / (x.std() + eps)
-    x = ( x - x.min()) /( x.max() - x.min() + eps) 
+    x = ( x - x.mean() ) / ( x.std() + eps )
+    x = ( x - x.min() ) / ( x.max() - x.min() + eps ) 
     return x
 
 class PixelNeRVLightningModule(LightningModule):
