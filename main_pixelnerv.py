@@ -196,6 +196,9 @@ def mean_and_norm(x, eps=1e-8):
     x = ( x - x.min() ) / ( x.max() - x.min() + eps ) 
     return x
 
+def reduce_and_deform(x, eps=1e-8):
+    return  x.mean(dim=1, keepdim=True)
+
 class PixelNeRVLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
         super().__init__()
@@ -330,19 +333,19 @@ class PixelNeRVLightningModule(LightningModule):
         )    
 
         # Reconstruct the appropriate XR
-        rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, norm_type=None, opacity=None, cameras=camera_random)
-        rec_figure_ct_random_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_random, norm_type=None, opacity=None, cameras=camera_hidden)
-        rec_figure_ct_hidden_random = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, norm_type=None, opacity=None, cameras=camera_random)
-        rec_figure_ct_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, norm_type=None, opacity=None, cameras=camera_hidden)
-        rec_figure_xr_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_xr_hidden, norm_type=None, opacity=None, cameras=camera_hidden)
+        rec_figure_ct_random_random = self.fwd_renderer.forward(image3d=est_volume_ct_random, norm_type="standardized", opacity=None, cameras=camera_random)
+        rec_figure_ct_random_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_random, norm_type="standardized", opacity=None, cameras=camera_hidden)
+        rec_figure_ct_hidden_random = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, norm_type="standardized", opacity=None, cameras=camera_random)
+        rec_figure_ct_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_ct_hidden, norm_type="standardized", opacity=None, cameras=camera_hidden)
+        rec_figure_xr_hidden_hidden = self.fwd_renderer.forward(image3d=est_volume_xr_hidden, norm_type="standardized", opacity=None, cameras=camera_hidden)
         
         # rec_elev_hidden, \
         # rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
         
         # Perform Post activation like DVGO
-        est_volume_ct_random = mean_and_norm(est_volume_ct_random) 
-        est_volume_ct_hidden = mean_and_norm(est_volume_ct_hidden) 
-        est_volume_xr_hidden = mean_and_norm(est_volume_xr_hidden) 
+        est_volume_ct_random = reduce_and_deform(est_volume_ct_random) 
+        est_volume_ct_hidden = reduce_and_deform(est_volume_ct_hidden) 
+        est_volume_xr_hidden = reduce_and_deform(est_volume_xr_hidden) 
 
         # rec_figure_ct_random_random = mean_and_relu(rec_figure_ct_random_random) 
         # rec_figure_ct_random_hidden = mean_and_relu(rec_figure_ct_random_hidden) 
