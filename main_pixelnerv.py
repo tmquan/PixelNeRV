@@ -36,37 +36,6 @@ from datamodule import UnpairedDataModule
 from dvr.renderer import DirectVolumeFrontToBackRenderer, minimized, normalized, standardized
 
 
-def init_weights(net, init_type='normal', init_gain=0.02):
-    """Initialize network weights.
-    Parameters:
-        net (network)   -- network to be initialized
-        init_type (str) -- the name of an initialization method: normal | xavier | kaiming | orthogonal
-        init_gain (float)    -- scaling factor for normal, xavier and orthogonal.
-    We use 'normal' in the original pix2pix and CycleGAN paper. But xavier and kaiming might
-    work better for some applications. Feel free to try yourself.
-    """
-    def init_func(m):  # define the initialization function
-        classname = m.__class__.__name__
-        if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
-            if init_type == 'normal':
-                nn.init.normal_(m.weight.data, 0.0, init_gain)
-            elif init_type == 'xavier':
-                nn.init.xavier_normal_(m.weight.data, gain=init_gain)
-            elif init_type == 'kaiming':
-                nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
-            elif init_type == 'orthogonal':
-                nn.init.orthogonal_(m.weight.data, gain=init_gain)
-            else:
-                raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
-            if hasattr(m, 'bias') and m.bias is not None:
-                nn.init.constant_(m.bias.data, 0.0)
-        elif classname.find('BatchNorm') != -1:  # BatchNorm Layer's weight is not a matrix; only normal distribution applies.
-            nn.init.normal_(m.weight.data, 1.0, init_gain)
-            nn.init.constant_(m.bias.data, 0.0)
-    # print('initialize network with %s' % init_type)
-    net.apply(init_func)  # apply the initialization function <init_func>
-    
-
 class PixelNeRVFrontToBackInverseRenderer(nn.Module):
     def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0, pe=8):
         super().__init__()
@@ -188,16 +157,38 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
 
         return volumes
 
+
+def init_weights(net, init_type='normal', init_gain=0.02):
+    """Initialize network weights.
+    Parameters:
+        net (network)   -- network to be initialized
+        init_type (str) -- the name of an initialization method: normal | xavier | kaiming | orthogonal
+        init_gain (float)    -- scaling factor for normal, xavier and orthogonal.
+    We use 'normal' in the original pix2pix and CycleGAN paper. But xavier and kaiming might
+    work better for some applications. Feel free to try yourself.
+    """
+    def init_func(m):  # define the initialization function
+        classname = m.__class__.__name__
+        if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
+            if init_type == 'normal':
+                nn.init.normal_(m.weight.data, 0.0, init_gain)
+            elif init_type == 'xavier':
+                nn.init.xavier_normal_(m.weight.data, gain=init_gain)
+            elif init_type == 'kaiming':
+                nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
+            elif init_type == 'orthogonal':
+                nn.init.orthogonal_(m.weight.data, gain=init_gain)
+            else:
+                raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
+            if hasattr(m, 'bias') and m.bias is not None:
+                nn.init.constant_(m.bias.data, 0.0)
+        elif classname.find('BatchNorm') != -1:  # BatchNorm Layer's weight is not a matrix; only normal distribution applies.
+            nn.init.normal_(m.weight.data, 1.0, init_gain)
+            nn.init.constant_(m.bias.data, 0.0)
+    # print('initialize network with %s' % init_type)
+    net.apply(init_func)  # apply the initialization function <init_func>
 def mean_and_tanh(x, eps=1e-8): return ( F.tanh(x.mean(dim=1, keepdim=True)) * 0.5 + 0.5 )  
 def mean_and_relu(x, eps=1e-8): return ( F.relu(x.mean(dim=1, keepdim=True)) )  
-def mean_and_norm(x, eps=1e-8): 
-    x = x.mean(dim=1, keepdim=True)
-    x = ( x - x.mean() ) / ( x.std() + eps )
-    x = ( x - x.min() ) / ( x.max() - x.min() + eps ) 
-    return x
-
-def reduce_and_deform(x, eps=1e-8):
-    return  x.mean(dim=1, keepdim=True)
 
 class PixelNeRVLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
@@ -284,11 +275,7 @@ class PixelNeRVLightningModule(LightningModule):
             azim=src_azim_locked.float() * 180
         )
         camera_locked = FoVPerspectiveCameras(R=R_locked, T=T_locked, fov=45, aspect_ratio=1).to(_device)
-        
-        # # Construct the hidden cameras
-        # src_elev_hidden = torch.zeros(self.batch_size, device=_device) 
-        # src_azim_hidden = torch.zeros(self.batch_size, device=_device) 
-        
+         
         # Construct the 2 CT projections
         est_figure_ct_random = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_random)
         est_figure_ct_locked = self.fwd_renderer.forward(image3d=image3d, opacity=None, cameras=camera_locked)
@@ -343,16 +330,19 @@ class PixelNeRVLightningModule(LightningModule):
         # rec_azim_hidden = self.forward_camera(rec_figure_xr_hidden_hidden)
         
         # Perform Post activation like DVGO
-        est_volume_ct_random = reduce_and_deform(est_volume_ct_random) 
-        est_volume_ct_hidden = reduce_and_deform(est_volume_ct_hidden) 
-        est_volume_xr_hidden = reduce_and_deform(est_volume_xr_hidden) 
+        est_volume_ct_random = est_volume_ct_random.sum(dim=1, keepdim=True)
+        est_volume_ct_hidden = est_volume_ct_hidden.sum(dim=1, keepdim=True)
+        est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
+        
+        # est_volume_ct_random = mean_and_tanh(est_volume_ct_random) 
+        # est_volume_ct_hidden = mean_and_tanh(est_volume_ct_hidden) 
+        # est_volume_xr_hidden = mean_and_tanh(est_volume_xr_hidden) 
 
         # rec_figure_ct_random_random = mean_and_relu(rec_figure_ct_random_random) 
         # rec_figure_ct_random_hidden = mean_and_relu(rec_figure_ct_random_hidden) 
         # rec_figure_ct_hidden_random = mean_and_relu(rec_figure_ct_hidden_random) 
         # rec_figure_ct_hidden_hidden = mean_and_relu(rec_figure_ct_hidden_hidden) 
         # rec_figure_xr_hidden_hidden = mean_and_relu(rec_figure_xr_hidden_hidden) 
-
 
         # Compute the loss
         im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random) \
