@@ -256,9 +256,11 @@ class PixelNeRVLightningModule(LightningModule):
         image3d = batch["image3d"]
         image2d = batch["image2d"]
 
-        if self.rng: # Randomly inject the noise volume
-            image3d = torch.rand_like(image3d) if (batch_idx%4)==2 else image3d
-
+        if stage=="train" and self.rng: # Randomly inject the noise volume
+            randoms = torch.rand_like(image3d) 
+            weights = torch.rand(1, device=_device)
+            image3d = weights * image3d + (1 - weights) * randoms
+            
         # Construct the random cameras
         src_elev_random = torch.randn(self.batch_size, device=_device) # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
         src_azim_random = torch.randn(self.batch_size, device=_device) #  0   1    -> 0 180
