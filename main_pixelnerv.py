@@ -196,6 +196,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.logsdir = hparams.logsdir
         self.lr = hparams.lr
         self.cam = hparams.cam
+        self.rng = hparams.rng
         self.shape = hparams.shape
         self.alpha = hparams.alpha
         self.gamma = hparams.gamma
@@ -254,7 +255,10 @@ class PixelNeRVLightningModule(LightningModule):
         _device = batch["image3d"].device
         image3d = batch["image3d"]
         image2d = batch["image2d"]
-        
+
+        if self.rng: # Randomly inject the noise volume
+            image3d = torch.rand_like(image3d) if (batch_idx%4)==2 else image3d
+
         # Construct the random cameras
         src_elev_random = torch.randn(self.batch_size, device=_device) # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
         src_azim_random = torch.randn(self.batch_size, device=_device) #  0   1    -> 0 180
@@ -455,6 +459,7 @@ if __name__ == "__main__":
     parser.add_argument("--pe", type=int, default=0, help="positional encoding (0 - 8)")
     
     parser.add_argument("--cam", action="store_true", help="train cam hidden or locked")
+    parser.add_argument("--rng", action="store_true", help="train with random volume")
     
     parser.add_argument("--alpha", type=float, default=1., help="vol loss")
     parser.add_argument("--gamma", type=float, default=1., help="img loss")
@@ -480,7 +485,7 @@ if __name__ == "__main__":
         filename='{epoch:02d}-{validation_loss_epoch:.2f}',
         save_top_k=-1,
         save_last=True,
-        every_n_epochs=5,
+        every_n_epochs=10,
     )
     lr_callback = LearningRateMonitor(logging_interval='step')
 
@@ -496,7 +501,7 @@ if __name__ == "__main__":
             lr_callback,
             checkpoint_callback,
         ],
-        # accumulate_grad_batches=4,
+        accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         strategy="fsdp",  # "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16,  # if hparams.use_amp else 32,
