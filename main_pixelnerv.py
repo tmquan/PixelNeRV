@@ -255,11 +255,6 @@ class PixelNeRVLightningModule(LightningModule):
         _device = batch["image3d"].device
         image3d = batch["image3d"]
         image2d = batch["image2d"]
-
-        if stage=="train" and self.rng: # Randomly inject the noise volume
-            randoms = torch.rand_like(image3d) 
-            weights = torch.rand(1, device=_device)
-            image3d = weights * image3d + (1 - weights) * randoms
             
         # Construct the random cameras
         src_elev_random = torch.randn(self.batch_size, device=_device) # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
@@ -339,16 +334,6 @@ class PixelNeRVLightningModule(LightningModule):
         est_volume_ct_random = est_volume_ct_random.sum(dim=1, keepdim=True)
         est_volume_ct_hidden = est_volume_ct_hidden.sum(dim=1, keepdim=True)
         est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
-        
-        # est_volume_ct_random = mean_and_tanh(est_volume_ct_random) 
-        # est_volume_ct_hidden = mean_and_tanh(est_volume_ct_hidden) 
-        # est_volume_xr_hidden = mean_and_tanh(est_volume_xr_hidden) 
-
-        # rec_figure_ct_random_random = mean_and_relu(rec_figure_ct_random_random) 
-        # rec_figure_ct_random_hidden = mean_and_relu(rec_figure_ct_random_hidden) 
-        # rec_figure_ct_hidden_random = mean_and_relu(rec_figure_ct_hidden_random) 
-        # rec_figure_ct_hidden_hidden = mean_and_relu(rec_figure_ct_hidden_hidden) 
-        # rec_figure_xr_hidden_hidden = mean_and_relu(rec_figure_xr_hidden_hidden) 
 
         # Compute the loss
         im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random) \
@@ -364,24 +349,12 @@ class PixelNeRVLightningModule(LightningModule):
                   + self.loss_smoothl1(src_azim_random, est_azim_random) \
                   + self.loss_smoothl1(src_elev_locked, est_elev_locked) \
                   + self.loss_smoothl1(src_azim_locked, est_azim_locked) 
-                  
-                #   + self.loss_smoothl1(est_elev_hidden, rec_elev_hidden) \
-                #   + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) 
-                #   + self.loss_smoothl1(src_elev_hidden, est_elev_hidden) \
-                #   + self.loss_smoothl1(src_azim_hidden, est_azim_hidden) \
-                #   + self.loss_smoothl1(src_elev_hidden, rec_elev_hidden) \
-                #   + self.loss_smoothl1(src_azim_hidden, rec_azim_hidden) 
    
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-        
-        if optimizer_idx==0:
-            loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
-        elif optimizer_idx==1:
-            loss = self.theta*view_loss
-        else:
-            loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
+
+        loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
 
         if batch_idx == 0:
             viz2d = torch.cat([
@@ -433,14 +406,14 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        # optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
-        # return [optimizer], [scheduler]
-        opt_inv = torch.optim.RAdam(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        opt_cam = torch.optim.RAdam(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
-        sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
-        return [opt_inv, opt_cam], [sch_inv, sch_cam]
+        optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
+        return [optimizer], [scheduler]
+        # opt_inv = torch.optim.RAdam(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        # opt_cam = torch.optim.RAdam(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        # sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
+        # sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
+        # return [opt_inv, opt_cam], [sch_inv, sch_cam]
 
 
 if __name__ == "__main__":
