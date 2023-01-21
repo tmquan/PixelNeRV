@@ -406,14 +406,14 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
-        return [optimizer], [scheduler]
-        # opt_inv = torch.optim.RAdam(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        # opt_cam = torch.optim.RAdam(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        # sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
-        # sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
-        # return [opt_inv, opt_cam], [sch_inv, sch_cam]
+        # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
+        # return [optimizer], [scheduler]
+        opt_inv = torch.optim.AdamW(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        opt_cam = torch.optim.AdamW(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
+        sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
+        return [opt_inv, opt_cam], [sch_inv, sch_cam]
 
 
 if __name__ == "__main__":
