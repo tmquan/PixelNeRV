@@ -354,7 +354,13 @@ class PixelNeRVLightningModule(LightningModule):
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
 
-        loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
+        # loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
+        if optimizer_idx==0:
+            loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
+        elif optimizer_idx==1:
+            loss = self.theta*view_loss + self.gamma*im2d_loss
+        else:
+            loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
 
         if batch_idx == 0:
             viz2d = torch.cat([
