@@ -219,7 +219,7 @@ class PixelNeRVLightningModule(LightningModule):
         #     in_channels=2,
         #     num_classes=1,
         # )
-        # Initialize the weights/bias with zeros (elev and azim) transformation
+        # # Initialize the weights/bias with zeros (elev and azim) transformation
         # self.cam_settings._fc.weight.data.zero_()
         # self.cam_settings._fc.bias.data.zero_()
         self.cam_settings = DenseNet121(
@@ -337,7 +337,7 @@ class PixelNeRVLightningModule(LightningModule):
 
         view_loss = self.loss_smoothl1(src_azim_random, est_azim_random) \
                   + self.loss_smoothl1(src_azim_locked, est_azim_locked) \
-                  + self.loss_smoothl1(est_azim_locked, rec_azim_locked) 
+                  + self.loss_smoothl1(src_azim_locked, rec_azim_locked) 
    
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
@@ -471,9 +471,9 @@ if __name__ == "__main__":
             lr_callback,
             checkpoint_callback,
         ],
-        accumulate_grad_batches=4,
+        # accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
-        strategy="fsdp",  # "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        strategy="ddp_sharded",  # "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16,  # if hparams.use_amp else 32,
         # stochastic_weight_avg=True,
         # deterministic=False,
