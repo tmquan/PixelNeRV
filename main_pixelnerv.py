@@ -426,6 +426,7 @@ if __name__ == "__main__":
     
     parser.add_argument("--cam", action="store_true", help="train cam locked or locked")
     parser.add_argument("--rng", action="store_true", help="train with random volume")
+    parser.add_argument("--amp", action="store_true", help="train with mixed precision or not")
     
     parser.add_argument("--alpha", type=float, default=1., help="vol loss")
     parser.add_argument("--gamma", type=float, default=1., help="img loss")
@@ -470,7 +471,7 @@ if __name__ == "__main__":
         # accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         strategy="ddp_sharded",  # "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
-        precision=16,  # if hparams.use_amp else 32,
+        precision=16 if hparams.amp else 32,
         # stochastic_weight_avg=True,
         # deterministic=False,
         # profiler="simple",
