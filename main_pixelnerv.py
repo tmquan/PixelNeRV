@@ -470,7 +470,7 @@ if __name__ == "__main__":
         ],
         # accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
-        strategy="ddp_sharded",  # "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        strategy="ddp_sharded",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16 if hparams.amp else 32,
         # stochastic_weight_avg=True,
         # deterministic=False,
