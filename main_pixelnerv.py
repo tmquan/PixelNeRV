@@ -31,7 +31,6 @@ from monai.networks.layers.factories import Norm, Act
 from monai.networks.layers import Reshape
 
 from positional_encodings.torch_encodings import PositionalEncodingPermute3D
-
 from datamodule import UnpairedDataModule
 from dvr.renderer import DirectVolumeFrontToBackRenderer, minimized, normalized, standardized
 
@@ -76,8 +75,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=2,
                 in_channels=in_channels,
                 out_channels=shape,
-                channels=(32, 48, 80, 224, 640, 800),
-                strides=(2, 2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640),
+                strides=(2, 2, 2, 2),
                 num_res_units=4,
                 kernel_size=3,
                 up_kernel_size=3,
@@ -93,8 +92,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=1+pe_channels,
                 out_channels=1,
-                channels=(32, 48, 80, 224, 640, 800),
-                strides=(2, 2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640),
+                strides=(2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
@@ -109,8 +108,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=2+pe_channels,
                 out_channels=1,
-                channels=(32, 48, 80, 224, 640, 800),
-                strides=(2, 2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640),
+                strides=(2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
@@ -125,8 +124,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=3+pe_channels,
                 out_channels=out_channels,
-                channels=(32, 48, 80, 224, 640, 800),
-                strides=(2, 2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640),
+                strides=(2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
@@ -212,22 +211,21 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.save_hyperparameters()
 
-        # self.cam_settings = EfficientNetBN(
-        #     model_name="efficientnet-b7", #(32, 48, 80, 224, 640, 800)
-        #     # pretrained=True, 
-        #     spatial_dims=3,
-        #     in_channels=2,
-        #     num_classes=1,
-        # )
-        # # Initialize the weights/bias with zeros (elev and azim) transformation
-        # self.cam_settings._fc.weight.data.zero_()
-        # self.cam_settings._fc.bias.data.zero_()
-        self.cam_settings = DenseNet121(
+        self.cam_settings = EfficientNetBN(
+            model_name="efficientnet-b7", #(32, 48, 80, 224, 640)
             # pretrained=True, 
             spatial_dims=3,
             in_channels=2,
-            out_channels=1,
+            num_classes=1,
         )
+        self.cam_settings._fc.weight.data.zero_()
+        self.cam_settings._fc.bias.data.zero_()
+        # self.cam_settings = DenseNet121(
+        #     # pretrained=True, 
+        #     spatial_dims=3,
+        #     in_channels=2,
+        #     out_channels=1,
+        # )
 
 
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
@@ -265,8 +263,8 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
             
         # Construct the random cameras
-        src_elev_random = torch.zeros(self.batch_size, device=_device) # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
-        src_azim_random = torch.randn(self.batch_size, device=_device) #  0   1    -> 0 180
+        src_elev_random = torch.zeros(self.batch_size, device=_device) # 
+        src_azim_random = torch.randn(self.batch_size, device=_device) # 
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         R_random, T_random = look_at_view_transform(
             dist=src_dist_random.float(), 
@@ -275,8 +273,8 @@ class PixelNeRVLightningModule(LightningModule):
         )
         camera_random = FoVPerspectiveCameras(R=R_random, T=T_random, fov=45, aspect_ratio=1).to(_device)
         
-        src_elev_locked = torch.zeros(self.batch_size, device=_device) # -0.5 0.5  -> -45 45 ;   -1 1 -> -90 90
-        src_azim_locked = torch.zeros(self.batch_size, device=_device) #  0   1    -> 0 180
+        src_elev_locked = torch.zeros(self.batch_size, device=_device) # 
+        src_azim_locked = torch.zeros(self.batch_size, device=_device) # 
         src_dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
         R_locked, T_locked = look_at_view_transform(
             dist=src_dist_locked.float(), 
@@ -289,13 +287,11 @@ class PixelNeRVLightningModule(LightningModule):
         est_figure_ct_random = self.fwd_renderer.forward(image3d=image3d, cameras=camera_random)
         est_figure_ct_locked = self.fwd_renderer.forward(image3d=image3d, cameras=camera_locked)
 
+        est_azim_random = self.forward_camera(est_figure_ct_random, image3d)
+        est_azim_locked = self.forward_camera(est_figure_ct_locked, image3d)
+        
         # Estimate camera_locked pose for XR
         src_figure_xr_locked = image2d
-        
-        est_azim_locked = self.forward_camera(est_figure_ct_locked, image3d)
-        est_azim_random = self.forward_camera(est_figure_ct_random, image3d)
-
-        est_figure_ct_locked = self.fwd_renderer.forward(image3d=image3d, cameras=camera_locked)
         
         # Jointly estimate the volumes
         # est_volume_ct_random = self.forward(est_figure_ct_random, est_azim_random)
