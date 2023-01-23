@@ -75,8 +75,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=2,
                 in_channels=in_channels,
                 out_channels=shape,
-                channels=(32, 48, 80, 224, 640),
-                strides=(2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640, 800),
+                strides=(2, 2, 2, 2, 2),
                 num_res_units=4,
                 kernel_size=3,
                 up_kernel_size=3,
@@ -92,8 +92,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=1+pe_channels,
                 out_channels=1,
-                channels=(32, 48, 80, 224, 640),
-                strides=(2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640, 800),
+                strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
@@ -108,8 +108,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=2+pe_channels,
                 out_channels=1,
-                channels=(32, 48, 80, 224, 640),
-                strides=(2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640, 800),
+                strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
@@ -124,8 +124,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=3+pe_channels,
                 out_channels=out_channels,
-                channels=(32, 48, 80, 224, 640),
-                strides=(2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640, 800),
+                strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
@@ -210,12 +210,19 @@ class PixelNeRVLightningModule(LightningModule):
         self.n_pts_per_ray = hparams.n_pts_per_ray
 
         self.save_hyperparameters()
-
+        
+        # self.cam_settings = EfficientNetBN(
+        #     model_name="efficientnet-b7", #(32, 48, 80, 224, 640)
+        #     # pretrained=True, 
+        #     spatial_dims=3,
+        #     in_channels=2,
+        #     num_classes=1,
+        # )
         self.cam_settings = EfficientNetBN(
             model_name="efficientnet-b7", #(32, 48, 80, 224, 640)
             # pretrained=True, 
-            spatial_dims=3,
-            in_channels=2,
+            spatial_dims=2,
+            in_channels=self.shape+1,
             num_classes=1,
         )
         self.cam_settings._fc.weight.data.zero_()
@@ -252,8 +259,12 @@ class PixelNeRVLightningModule(LightningModule):
                                         ], dim=1)) 
 
     def forward_camera(self, figures, volumes):         
-        azimuth = self.cam_settings(torch.cat([figures.unsqueeze(2).repeat(1, 1, self.shape, 1, 1) * 2.0 - 1.0, 
-                                               volumes * 2.0 - 1.0, 
+        # azimuth = self.cam_settings(torch.cat([figures.unsqueeze(2).repeat(1, 1, self.shape, 1, 1) * 2.0 - 1.0, 
+        #                                        volumes * 2.0 - 1.0, 
+        #                                     ], dim=1))
+        # azimuth = self.cam_settings(figures * 2.0 - 1.0) 
+        azimuth = self.cam_settings(torch.cat([figures * 2.0 - 1.0, 
+                                               volumes.squeeze(1) * 2.0 - 1.0, 
                                             ], dim=1))
         return F.tanh(azimuth)
         
