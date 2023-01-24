@@ -19,7 +19,8 @@ from pytorch3d.renderer.cameras import (
 )
 
 
-from pytorch_lightning.utilities.seed import seed_everything
+# from pytorch_lightning.utilities.seed import seed_everything
+from lightning_fabric.utilities.seed import seed_everything
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -34,6 +35,23 @@ from positional_encodings.torch_encodings import PositionalEncodingPermute3D
 from datamodule import UnpairedDataModule
 from dvr.renderer import DirectVolumeFrontToBackRenderer, minimized, normalized, standardized
 
+class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
+    def __init__(self, in_channels=1, out_channels=1, shape=256, sh=0, pe=8):
+        super().__init__()
+        self.sh = sh
+        self.pe = pe
+        self.shape = shape
+
+        self.img_settings = EfficientNetBN(
+            model_name="efficientnet-b7", #(32, 48, 80, 224, 640)
+            pretrained=True, 
+            spatial_dims=2,
+            in_channels=in_channels,
+            num_classes=1,
+        )
+
+    def forward(self, figures):
+        return F.tanh(self.img_settings.forward(figures))
 
 class PixelNeRVFrontToBackInverseRenderer(nn.Module):
     def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0, pe=8):
@@ -210,30 +228,11 @@ class PixelNeRVLightningModule(LightningModule):
         self.n_pts_per_ray = hparams.n_pts_per_ray
 
         self.save_hyperparameters()
-        
-        # self.cam_settings = EfficientNetBN(
-        #     model_name="efficientnet-b7", #(32, 48, 80, 224, 640)
-        #     # pretrained=True, 
-        #     spatial_dims=3,
-        #     in_channels=2,
-        #     num_classes=1,
-        # )
-        self.cam_settings = EfficientNetBN(
-            model_name="efficientnet-b7", #(32, 48, 80, 224, 640)
-            # pretrained=True, 
-            spatial_dims=2,
-            in_channels=self.shape+1,
-            num_classes=1,
+    
+        self.cam_settings = PixelNeRVFrontToBackFrustumFeaturer(
+            in_channels=1, 
+            out_channels=1,
         )
-        self.cam_settings._fc.weight.data.zero_()
-        self.cam_settings._fc.bias.data.zero_()
-        # self.cam_settings = DenseNet121(
-        #     # pretrained=True, 
-        #     spatial_dims=3,
-        #     in_channels=2,
-        #     out_channels=1,
-        # )
-
 
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
@@ -244,7 +243,7 @@ class PixelNeRVLightningModule(LightningModule):
         )
         
         self.inv_renderer = PixelNeRVFrontToBackInverseRenderer(
-            in_channels=2, 
+            in_channels=1, 
             out_channels=9 if self.sh==2 else 16 if self.sh==3 else 1, 
             shape=self.shape, 
             sh=self.sh, 
@@ -253,20 +252,11 @@ class PixelNeRVLightningModule(LightningModule):
         # init_weights(self.inv_renderer, init_type="normal")
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
-    def forward(self, figures, azimuth):      
-        return self.inv_renderer(torch.cat([figures * 2.0 - 1.0, 
-                                            azimuth.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape), 
-                                        ], dim=1)) 
+    def forward_volume(self, figures):      
+        return self.inv_renderer(figures * 2.0 - 1.0) 
 
-    def forward_camera(self, figures, volumes):         
-        # azimuth = self.cam_settings(torch.cat([figures.unsqueeze(2).repeat(1, 1, self.shape, 1, 1) * 2.0 - 1.0, 
-        #                                        volumes * 2.0 - 1.0, 
-        #                                     ], dim=1))
-        # azimuth = self.cam_settings(figures * 2.0 - 1.0) 
-        azimuth = self.cam_settings(torch.cat([figures * 2.0 - 1.0, 
-                                               volumes.squeeze(1) * 2.0 - 1.0, 
-                                            ], dim=1))
-        return F.tanh(azimuth)
+    def forward_camera(self, figures):         
+        return self.cam_settings(figures * 2.0 - 1.0)
         
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -298,22 +288,21 @@ class PixelNeRVLightningModule(LightningModule):
         est_figure_ct_random = self.fwd_renderer.forward(image3d=image3d, cameras=camera_random)
         est_figure_ct_locked = self.fwd_renderer.forward(image3d=image3d, cameras=camera_locked)
 
-        est_azim_random = self.forward_camera(est_figure_ct_random, image3d)
-        est_azim_locked = self.forward_camera(est_figure_ct_locked, image3d)
+        est_azim_random = self.cam_settings.forward(est_figure_ct_random)
+        est_azim_locked = self.cam_settings.forward(est_figure_ct_locked)
         
         # Estimate camera_locked pose for XR
         src_figure_xr_locked = image2d
         
         # Jointly estimate the volumes
-        # est_volume_ct_random = self.forward(est_figure_ct_random, est_azim_random)
-        # est_volume_ct_locked = self.forward(est_figure_ct_locked, est_azim_locked)
-        # est_volume_xr_locked = self.forward(src_figure_xr_locked, est_azim_locked)
+        # est_volume_ct_random = self.inv_renderer.forward(est_figure_ct_random)
+        # est_volume_ct_locked = self.inv_renderer.forward(est_figure_ct_locked)
+        # est_volume_xr_locked = self.inv_renderer.forward(src_figure_xr_locked)
         est_volume_ct_random, \
         est_volume_ct_locked, \
         est_volume_xr_locked = torch.split(
-            self.forward(
+            self.inv_renderer.forward(
                 torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_locked]),
-                torch.cat([est_azim_random, est_azim_locked, est_azim_locked]),
             ), self.batch_size
         )  
 
@@ -330,7 +319,7 @@ class PixelNeRVLightningModule(LightningModule):
         est_volume_xr_locked = est_volume_xr_locked.sum(dim=1, keepdim=True)
         
         # Reconstruct the camera locked
-        rec_azim_locked = self.forward_camera(rec_figure_xr_locked_locked, est_volume_xr_locked)
+        rec_azim_locked = self.cam_settings.forward(rec_figure_xr_locked_locked)
 
         # Compute the loss
         im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random) \
@@ -481,7 +470,7 @@ if __name__ == "__main__":
         ],
         # accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
-        strategy="ddp_sharded",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        strategy="ddp",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16 if hparams.amp else 32,
         # stochastic_weight_avg=True,
         # deterministic=False,
