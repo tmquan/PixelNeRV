@@ -21,7 +21,7 @@ from pytorch3d.renderer.cameras import (
 
 # from pytorch_lightning.utilities.seed import seed_everything
 from lightning_fabric.utilities.seed import seed_everything
-from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer, LightningModule
@@ -471,7 +471,9 @@ if __name__ == "__main__":
     # Callback
     checkpoint_callback = ModelCheckpoint(
         dirpath=hparams.logsdir,
-        filename='{epoch:02d}-{validation_loss_epoch:.2f}',
+        # filename='epoch={epoch}-validation_loss={validation_loss_epoch:.2f}',
+        monitor="validation_loss_epoch",
+        auto_insert_metric_name=True, 
         save_top_k=-1,
         save_last=True,
         every_n_epochs=10,
