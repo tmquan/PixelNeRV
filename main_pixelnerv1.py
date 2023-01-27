@@ -86,23 +86,44 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             # torch.Size([100, 100, 100, 9 or 16])
             self.register_buffer('shbasis', shw.unsqueeze(0).permute(0, 4, 1, 2, 3))
             
-        self.clarity_net = nn.Sequential(
-            Unet(
-                spatial_dims=2,
-                in_channels=in_channels,
-                out_channels=shape,
-                # channels=(16, 24, 40, 112, 320, 512),
-                # channels=(24, 32, 56, 160, 448, 640),
-                channels=(32, 48, 80, 224, 640, 800),
-                strides=(2, 2, 2, 2, 2),
-                num_res_units=4,
-                kernel_size=3,
-                up_kernel_size=3,
-                act=("LeakyReLU", {"inplace": True}),
-                norm=Norm.BATCH,
-                # dropout=0.4,
+        # self.clarity_net = nn.Sequential(
+        #     Unet(
+        #         spatial_dims=2,
+        #         in_channels=in_channels,
+        #         out_channels=shape,
+        #         # channels=(16, 24, 40, 112, 320, 512),
+        #         # channels=(24, 32, 56, 160, 448, 640),
+        #         # channels=(32, 48, 80, 224, 640, 800),
+        #         channels=(32, 48, 128 2256 6512 800),
+        #         strides=(2, 2, 2, 2, 2),
+        #         num_res_units=4,
+        #         kernel_size=3,
+        #         up_kernel_size=3,
+        #         act=("LeakyReLU", {"inplace": True}),
+        #         norm=Norm.BATCH,
+        #         # dropout=0.4,
+        #     ),
+        #     Reshape(*[1, shape, shape, shape]),
+        # )
+        self.clarity_net = UNet2DModel(
+            sample_size=shape,  # the target image resolution
+            in_channels=1,  # the number of input channels, 3 for RGB images
+            out_channels=shape,  # the number of output channels
+            layers_per_block=2,  # how many ResNet layers to use per UNet block
+            block_out_channels=(32, 48, 80, 128),  # More channels -> more parameters
+            norm_num_groups=16,
+            down_block_types=(
+                "DownBlock2D",      # a regular ResNet downsampling block
+                "DownBlock2D",
+                "DownBlock2D",  # a ResNet downsampling block with spatial self-attention
+                "AttnDownBlock2D",
             ),
-            Reshape(*[1, shape, shape, shape]),
+            up_block_types=(
+                "AttnUpBlock2D",
+                "UpBlock2D",    # a ResNet upsampling block with spatial self-attention
+                "UpBlock2D",
+                "UpBlock2D",        # a regular ResNet upsampling block
+            ),
         )
 
         self.density_net = nn.Sequential(
@@ -113,6 +134,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 # channels=(16, 24, 40, 112, 320, 512),
                 # channels=(24, 32, 56, 160, 448, 640),
                 channels=(32, 48, 80, 224, 640, 800),
+                # channels=(32, 48, 80, 128, 256, 512),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -131,6 +153,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 # channels=(16, 24, 40, 112, 320, 512),
                 # channels=(24, 32, 56, 160, 448, 640),
                 channels=(32, 48, 80, 224, 640, 800),
+                # channels=(32, 48, 80, 128, 256, 512),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -149,6 +172,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 # channels=(16, 24, 40, 112, 320, 512),
                 # channels=(24, 32, 56, 160, 448, 640),
                 channels=(32, 48, 80, 224, 640, 800),
+                # channels=(32, 48, 80, 128, 256, 512),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -160,8 +184,9 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         )
              
     def forward(self, figures, camfeat):
-        figfeat = torch.cat([figures, camfeat.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape)], dim=1)
-        clarity = self.clarity_net(figfeat)
+        # figfeat = torch.cat([figures, camfeat.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape)], dim=1)
+        # clarity = self.clarity_net(figfeat)
+        clarity = self.clarity_net(figures, camfeat * 180)[0].view(-1, 1, self.shape, self.shape, self.shape)
         if self.pe > 0:
             density = self.density_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity], dim=1))
             mixture = self.mixture_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity, density], dim=1))
