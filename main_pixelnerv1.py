@@ -37,47 +37,19 @@ from datamodule import UnpairedDataModule
 from dvr.renderer import DirectVolumeFrontToBackRenderer, minimized, normalized, standardized
 
 class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
-    def __init__(self, in_channels=1, mid_channels=10, out_channels=1, shape=256, sh=0, pe=8):
+    def __init__(self, in_channels=1, out_channels=1):
         super().__init__()
-        self.sh = sh
-        self.pe = pe
-        self.shape = shape
-
-        # self.img_settings = EfficientNetBN(
-        #     model_name="efficientnet-b1", #(24, 32, 56, 160, 448)
-        #     pretrained=True, 
-        #     spatial_dims=2,
-        #     in_channels=in_channels,
-        #     num_classes=mid_channels,
-        # )
-
-        # self.vol_settings = EfficientNetBN(
-        #     model_name="efficientnet-b1", #(24, 32, 56, 160, 448)
-        #     pretrained=True, 
-        #     spatial_dims=3,
-        #     in_channels=in_channels,
-        #     num_classes=mid_channels,
-        # )
-
-        self.img_settings = DenseNet121(
+        self.img_settings = EfficientNetBN(
+            model_name="efficientnet-b7", #(24, 32, 56, 160, 448)
+            pretrained=True, 
             spatial_dims=2,
             in_channels=in_channels,
-            out_channels=mid_channels,
+            num_classes=out_channels,
         )
 
-        self.vol_settings = DenseNet121(
-            spatial_dims=3,
-            in_channels=in_channels,
-            out_channels=mid_channels,
-        )
-
-        self.cam_settings = nn.Linear(2*mid_channels, out_channels)
-
-    def forward(self, figures, volumes):
+    def forward(self, figures):
         imgfeat = self.img_settings.forward(figures)
-        volfeat = self.vol_settings.forward(volumes)
-        camfeat = self.cam_settings(torch.cat([imgfeat, volfeat], dim=1))
-        return camfeat.squeeze()
+        return imgfeat.squeeze(1)
 
 class PixelNeRVFrontToBackInverseRenderer(nn.Module):
     def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0, pe=8):
@@ -120,8 +92,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 in_channels=in_channels,
                 out_channels=shape,
                 # channels=(16, 24, 40, 112, 320, 512),
-                channels=(24, 32, 56, 160, 448, 640),
-                # channels=(32, 48, 80, 224, 640, 800),
+                # channels=(24, 32, 56, 160, 448, 640),
+                channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=4,
                 kernel_size=3,
@@ -139,8 +111,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 in_channels=1+pe_channels,
                 out_channels=1,
                 # channels=(16, 24, 40, 112, 320, 512),
-                channels=(24, 32, 56, 160, 448, 640),
-                # channels=(32, 48, 80, 224, 640, 800),
+                # channels=(24, 32, 56, 160, 448, 640),
+                channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -157,8 +129,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 in_channels=2+pe_channels,
                 out_channels=1,
                 # channels=(16, 24, 40, 112, 320, 512),
-                channels=(24, 32, 56, 160, 448, 640),
-                # channels=(32, 48, 80, 224, 640, 800),
+                # channels=(24, 32, 56, 160, 448, 640),
+                channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -175,8 +147,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 in_channels=3+pe_channels,
                 out_channels=out_channels,
                 # channels=(16, 24, 40, 112, 320, 512),
-                channels=(24, 32, 56, 160, 448, 640),
-                # channels=(32, 48, 80, 224, 640, 800),
+                # channels=(24, 32, 56, 160, 448, 640),
+                channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -289,7 +261,6 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.cam_settings = PixelNeRVFrontToBackFrustumFeaturer(
             in_channels=1, 
-            mid_channels=10,
             out_channels=1,
         )
 
@@ -302,8 +273,8 @@ class PixelNeRVLightningModule(LightningModule):
     def forward_volume(self, image2d, camfeat):      
         return self.inv_renderer(image2d * 2.0 - 1.0, camfeat) 
 
-    def forward_camera(self, image2d, image3d):
-        return self.cam_settings(image2d * 2.0 - 1.0, image3d * 2.0 - 1.0)
+    def forward_camera(self, image2d):
+        return self.cam_settings(image2d * 2.0 - 1.0)
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -327,25 +298,21 @@ class PixelNeRVLightningModule(LightningModule):
            
         # Estimate camera_locked pose for XR
         src_figure_xr_hidden = image2d
-       
+        est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden)
+        est_elev_hidden = torch.zeros(self.batch_size, device=_device) # 
+        est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
+        camera_hidden = make_cameras(est_dist_hidden, est_elev_hidden, est_azim_hidden)
+
         # Jointly estimate the volumes
-        # est_volume_ct_random = self.inv_renderer.forward(est_figure_ct_random, src_azim_random)
-        # est_volume_ct_locked = self.inv_renderer.forward(est_figure_ct_locked, src_azim_locked)
-        # est_volume_xr_hidden = self.inv_renderer.forward(src_figure_xr_hidden, src_azim_locked)
         est_volume_ct_random, \
         est_volume_ct_locked, \
         est_volume_xr_hidden = torch.split(
             self.forward_volume(
                 image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
-                camfeat=torch.cat([src_azim_random, src_azim_locked, src_azim_locked]),
+                camfeat=torch.cat([     src_azim_random,      src_azim_locked,      est_azim_hidden]),
             ), self.batch_size
         )  
         
-        est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden, image3d=est_volume_xr_hidden.sum(dim=1, keepdim=True))
-        est_elev_hidden = torch.zeros(self.batch_size, device=_device) # 
-        est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
-        camera_hidden = make_cameras(est_dist_hidden, est_elev_hidden, est_azim_hidden)
-
         # Reconstruct the appropriate XR
         rec_figure_ct_random_random = self.forward_screen(image3d=est_volume_ct_random, cameras=camera_random)
         rec_figure_ct_random_locked = self.forward_screen(image3d=est_volume_ct_random, cameras=camera_locked)
@@ -359,10 +326,16 @@ class PixelNeRVLightningModule(LightningModule):
         est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
 
         # Reconstruct the camera locked
-        est_azim_random = self.forward_camera(image3d=est_volume_ct_random, image2d=est_figure_ct_random)
-        est_azim_locked = self.forward_camera(image3d=est_volume_ct_locked, image2d=est_figure_ct_locked)
-        rec_azim_hidden = self.forward_camera(image3d=est_volume_xr_hidden, image2d=est_figure_xr_hidden_hidden)
-        
+        # est_azim_random = self.forward_camera(image2d=est_figure_ct_random)
+        # est_azim_locked = self.forward_camera(image2d=est_figure_ct_locked)
+        # rec_azim_hidden = self.forward_camera(image2d=est_figure_xr_hidden_hidden)
+        est_azim_random, \
+        est_azim_locked, \
+        rec_azim_hidden = torch.split(
+            self.forward_camera(
+                image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, est_figure_xr_hidden_hidden])
+            ), self.batch_size
+        )
         # Compute the loss
         im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random) \
                   + self.loss_smoothl1(image3d, est_volume_ct_locked) 
