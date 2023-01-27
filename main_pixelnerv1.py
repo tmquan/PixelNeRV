@@ -124,7 +124,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # norm=Norm.BATCH,
+                norm=Norm.BATCH,
                 # dropout=0.4,
             ),
             Reshape(*[1, shape, shape, shape]),
@@ -141,7 +141,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # norm=Norm.BATCH,
+                norm=Norm.BATCH,
                 # dropout=0.4,
             ),
         )
@@ -157,7 +157,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # norm=Norm.BATCH,
+                norm=Norm.BATCH,
                 # dropout=0.4,
             ),
         )
@@ -173,7 +173,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
-                # norm=Norm.BATCH,
+                norm=Norm.BATCH,
                 # dropout=0.4,
             ), 
         )
@@ -320,17 +320,17 @@ class PixelNeRVLightningModule(LightningModule):
         src_figure_xr_hidden = image2d
        
         # Jointly estimate the volumes
-        est_volume_ct_random = self.inv_renderer.forward(est_figure_ct_random, src_azim_random)
-        est_volume_ct_locked = self.inv_renderer.forward(est_figure_ct_locked, src_azim_locked)
-        est_volume_xr_hidden = self.inv_renderer.forward(src_figure_xr_hidden, src_azim_locked)
-        # est_volume_ct_random, \
-        # est_volume_ct_locked, \
-        # est_volume_xr_hidden = torch.split(
-        #     self.forward_volume(
-        #         image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
-        #         camfeat=torch.cat([src_azim_random, src_azim_locked, src_azim_locked]),
-        #     ), self.batch_size
-        # )  
+        # est_volume_ct_random = self.inv_renderer.forward(est_figure_ct_random, src_azim_random)
+        # est_volume_ct_locked = self.inv_renderer.forward(est_figure_ct_locked, src_azim_locked)
+        # est_volume_xr_hidden = self.inv_renderer.forward(src_figure_xr_hidden, src_azim_locked)
+        est_volume_ct_random, \
+        est_volume_ct_locked, \
+        est_volume_xr_hidden = torch.split(
+            self.forward_volume(
+                image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
+                camfeat=torch.cat([src_azim_random, src_azim_locked, src_azim_locked]),
+            ), self.batch_size
+        )  
         
         est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden, image3d=est_volume_xr_hidden.sum(dim=1, keepdim=True))
         est_elev_hidden = torch.zeros(self.batch_size, device=_device) # 
