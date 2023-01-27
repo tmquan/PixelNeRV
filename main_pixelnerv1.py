@@ -46,6 +46,8 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
             in_channels=in_channels,
             num_classes=out_channels,
         )
+        self.img_settings._fc.weight.data.zero_()
+        self.img_settings._fc.bias.data.zero_()
 
     def forward(self, figures):
         imgfeat = self.img_settings.forward(figures)
@@ -512,7 +514,7 @@ if __name__ == "__main__":
         ],
         # accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
-        strategy="ddp_sharded",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        strategy="fsdp",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16 if hparams.amp else 32,
         # stochastic_weight_avg=True,
         # deterministic=False,
