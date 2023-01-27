@@ -85,46 +85,26 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 assert out_channels == 16
             else:
                 ValueError("Spherical Harmonics only support 2 and 3 degree")
-            # torch.Size([100, 100, 100, 9 or 16])
             self.register_buffer('shbasis', shw.unsqueeze(0).permute(0, 4, 1, 2, 3))
-            
-        # self.clarity_net = nn.Sequential(
-        #     Unet(
-        #         spatial_dims=2,
-        #         in_channels=in_channels,
-        #         out_channels=shape,
-        #         # channels=(16, 24, 40, 112, 320, 512),
-        #         # channels=(24, 32, 56, 160, 448, 640),
-        #         # channels=(32, 48, 80, 224, 640, 800),
-        #         channels=(32, 48, 128 2256 6512 800),
-        #         strides=(2, 2, 2, 2, 2),
-        #         num_res_units=4,
-        #         kernel_size=3,
-        #         up_kernel_size=3,
-        #         act=("LeakyReLU", {"inplace": True}),
-        #         norm=Norm.BATCH,
-        #         # dropout=0.4,
-        #     ),
-        #     Reshape(*[1, shape, shape, shape]),
-        # )
+     
         self.clarity_net = UNet2DModel(
-            sample_size=shape,  # the target image resolution
-            in_channels=1,  # the number of input channels, 3 for RGB images
-            out_channels=shape,  # the number of output channels
+            sample_size=shape,  
+            in_channels=1,  
+            out_channels=shape,
             layers_per_block=2,  # how many ResNet layers to use per UNet block
             block_out_channels=(32, 48, 80, 128),  # More channels -> more parameters
             norm_num_groups=16,
             down_block_types=(
-                "DownBlock2D",      # a regular ResNet downsampling block
+                "DownBlock2D",  
                 "DownBlock2D",
-                "DownBlock2D",  # a ResNet downsampling block with spatial self-attention
+                "DownBlock2D",  
                 "AttnDownBlock2D",
             ),
             up_block_types=(
                 "AttnUpBlock2D",
-                "UpBlock2D",    # a ResNet upsampling block with spatial self-attention
+                "UpBlock2D",    
                 "UpBlock2D",
-                "UpBlock2D",        # a regular ResNet upsampling block
+                "UpBlock2D",    
             ),
         )
 
