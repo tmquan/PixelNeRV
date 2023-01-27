@@ -20,8 +20,8 @@ from pytorch3d.renderer.cameras import (
 )
 
 from diffusers import UNet2DModel
-# from pytorch_lightning.utilities.seed import seed_everything
-from lightning_fabric.utilities.seed import seed_everything
+from pytorch_lightning.utilities.seed import seed_everything
+# from lightning_fabric.utilities.seed import seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -120,7 +120,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 in_channels=in_channels,
                 out_channels=shape,
                 # channels=(16, 24, 40, 112, 320, 512),
-                channels=(32, 48, 80, 224, 640, 800),
+                channels=(24, 32, 56, 160, 448, 640),
+                # channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=4,
                 kernel_size=3,
@@ -138,7 +139,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 in_channels=1+pe_channels,
                 out_channels=1,
                 # channels=(16, 24, 40, 112, 320, 512),
-                channels=(32, 48, 80, 224, 640, 800),
+                channels=(24, 32, 56, 160, 448, 640),
+                # channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -155,7 +157,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 in_channels=2+pe_channels,
                 out_channels=1,
                 # channels=(16, 24, 40, 112, 320, 512),
-                channels=(32, 48, 80, 224, 640, 800),
+                channels=(24, 32, 56, 160, 448, 640),
+                # channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -172,7 +175,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 in_channels=3+pe_channels,
                 out_channels=out_channels,
                 # channels=(16, 24, 40, 112, 320, 512),
-                channels=(32, 48, 80, 224, 640, 800),
+                channels=(24, 32, 56, 160, 448, 640),
+                # channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -510,7 +514,7 @@ if __name__ == "__main__":
         ],
         # accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
-        strategy="ddp",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        strategy="ddp_sharded",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16 if hparams.amp else 32,
         # stochastic_weight_avg=True,
         # deterministic=False,
