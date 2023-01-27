@@ -38,8 +38,8 @@ class DirectVolumeRenderer(nn.Module):
 
     def forward(
         self, 
-        cameras, 
         image3d, 
+        cameras, 
         opacity=None, 
         norm_type="standardized", 
         scaling_factor=0.1, 
