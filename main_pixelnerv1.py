@@ -43,32 +43,33 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
         self.pe = pe
         self.shape = shape
 
-        self.img_settings = EfficientNetBN(
-            model_name="efficientnet-b1", #(24, 32, 56, 160, 448)
-            pretrained=True, 
-            spatial_dims=2,
-            in_channels=in_channels,
-            num_classes=mid_channels,
-        )
-        self.vol_settings = EfficientNetBN(
-            model_name="efficientnet-b1", #(24, 32, 56, 160, 448)
-            pretrained=True, 
-            spatial_dims=3,
-            in_channels=in_channels,
-            num_classes=mid_channels,
-        )
-
-        # self.img_settings = DenseNet121(
+        # self.img_settings = EfficientNetBN(
+        #     model_name="efficientnet-b1", #(24, 32, 56, 160, 448)
+        #     pretrained=True, 
         #     spatial_dims=2,
         #     in_channels=in_channels,
-        #     out_channels=mid_channels,
+        #     num_classes=mid_channels,
         # )
 
-        # self.vol_settings = DenseNet121(
+        # self.vol_settings = EfficientNetBN(
+        #     model_name="efficientnet-b1", #(24, 32, 56, 160, 448)
+        #     pretrained=True, 
         #     spatial_dims=3,
         #     in_channels=in_channels,
-        #     out_channels=mid_channels,
+        #     num_classes=mid_channels,
         # )
+
+        self.img_settings = DenseNet121(
+            spatial_dims=2,
+            in_channels=in_channels,
+            out_channels=mid_channels,
+        )
+
+        self.vol_settings = DenseNet121(
+            spatial_dims=3,
+            in_channels=in_channels,
+            out_channels=mid_channels,
+        )
 
         self.cam_settings = nn.Linear(2*mid_channels, out_channels)
 
@@ -118,7 +119,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=2,
                 in_channels=in_channels,
                 out_channels=shape,
-                channels=(16, 24, 40, 112, 320, 512),
+                # channels=(16, 24, 40, 112, 320, 512),
+                channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=4,
                 kernel_size=3,
@@ -135,7 +137,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=1+pe_channels,
                 out_channels=1,
-                channels=(16, 24, 40, 112, 320, 512),
+                # channels=(16, 24, 40, 112, 320, 512),
+                channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -151,7 +154,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=2+pe_channels,
                 out_channels=1,
-                channels=(16, 24, 40, 112, 320, 512),
+                # channels=(16, 24, 40, 112, 320, 512),
+                channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -167,7 +171,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=3+pe_channels,
                 out_channels=out_channels,
-                channels=(16, 24, 40, 112, 320, 512),
+                # channels=(16, 24, 40, 112, 320, 512),
+                channels=(32, 48, 80, 224, 640, 800),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -505,7 +510,7 @@ if __name__ == "__main__":
         ],
         # accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
-        strategy="ddp_sharded",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        strategy="ddp",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16 if hparams.amp else 32,
         # stochastic_weight_avg=True,
         # deterministic=False,
