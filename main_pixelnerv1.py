@@ -36,11 +36,25 @@ from positional_encodings.torch_encodings import PositionalEncodingPermute3D
 from datamodule import UnpairedDataModule
 from dvr.renderer import DirectVolumeFrontToBackRenderer, minimized, normalized, standardized
 
+backbones = {
+    "efficientnet-b0": (16, 24, 40, 112, 320),
+    "efficientnet-b1": (16, 24, 40, 112, 320),
+    "efficientnet-b2": (16, 24, 48, 120, 352),
+    "efficientnet-b3": (24, 32, 48, 136, 384),
+    "efficientnet-b4": (24, 32, 56, 160, 448),
+    "efficientnet-b5": (24, 40, 64, 176, 512),
+    "efficientnet-b6": (32, 40, 72, 200, 576),
+    "efficientnet-b7": (32, 48, 80, 224, 640),
+    "efficientnet-b8": (32, 56, 88, 248, 704),
+    "efficientnet-l2": (72, 104, 176, 480, 1376),
+}
+
 class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
-    def __init__(self, in_channels=1, out_channels=1):
+    def __init__(self, in_channels=1, out_channels=1, backbone="efficientnet-b7"):
         super().__init__()
+        assert backbone in backbones.keys()
         self.img_settings = EfficientNetBN(
-            model_name="efficientnet-b7", #(24, 32, 56, 160, 448)
+            model_name=backbone, #(24, 32, 56, 160, 448)
             pretrained=True, 
             spatial_dims=2,
             in_channels=in_channels,
@@ -54,12 +68,12 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
         return F.tanh(imgfeat.squeeze(1))
 
 class PixelNeRVFrontToBackInverseRenderer(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0, pe=8):
+    def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0, pe=8, backbone="efficientnet-b7"):
         super().__init__()
         self.sh = sh
         self.pe = pe
         self.shape = shape
-
+        assert backbone in backbones.keys()
         if self.pe>0:
             encoder_net = PositionalEncodingPermute3D(self.pe) # 8
             pe_channels = self.pe
@@ -92,7 +106,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             in_channels=1,  
             out_channels=shape,
             layers_per_block=2,  # how many ResNet layers to use per UNet block
-            block_out_channels=(32, 48, 80, 224, 640),  # More channels -> more parameters
+            block_out_channels=backbones[backbone], #(32, 48, 80, 224, 640),  # More channels -> more parameters
             norm_num_groups=16,
             down_block_types=(
                 "DownBlock2D",  
@@ -115,11 +129,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=1+pe_channels,
                 out_channels=1,
-                # channels=(16, 24, 40, 112, 320, 512),
-                # channels=(24, 32, 56, 160, 448, 640),
-                # channels=(32, 48, 80, 224, 640, 800),
-                # channels=(32, 48, 80, 128, 256, 512),
-                channels=(32, 48, 80, 224, 640),
+                channels=backbones[backbone], #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -135,11 +145,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=2+pe_channels,
                 out_channels=1,
-                # channels=(16, 24, 40, 112, 320, 512),
-                # channels=(24, 32, 56, 160, 448, 640),
-                # channels=(32, 48, 80, 224, 640, 800),
-                # channels=(32, 48, 80, 128, 256, 512),
-                channels=(32, 48, 80, 224, 640),
+                channels=backbones[backbone], #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -155,11 +161,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=3+pe_channels,
                 out_channels=out_channels,
-                # channels=(16, 24, 40, 112, 320, 512),
-                # channels=(24, 32, 56, 160, 448, 640),
-                # channels=(32, 48, 80, 224, 640, 800),
-                # channels=(32, 48, 80, 128, 256, 512),
-                channels=(32, 48, 80, 224, 640),
+                channels=backbones[backbone], #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
@@ -250,7 +252,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.weight_decay = hparams.weight_decay
         self.batch_size = hparams.batch_size
         self.devices = hparams.devices
-
+        self.backbone = hparams.backbone
         self.n_pts_per_ray = hparams.n_pts_per_ray
 
         self.save_hyperparameters()
@@ -269,11 +271,13 @@ class PixelNeRVLightningModule(LightningModule):
             shape=self.shape, 
             sh=self.sh, 
             pe=self.pe,
+            backbone=self.backbone,
         )
 
         self.cam_settings = PixelNeRVFrontToBackFrustumFeaturer(
             in_channels=1, 
             out_channels=1,
+            backbone=self.backbone,
         )
 
         # init_weights(self.inv_renderer, init_type="normal")
@@ -463,7 +467,7 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt", type=str, default=None, help="path to checkpoint")
     parser.add_argument("--logsdir", type=str, default='logsfrecaling', help="logging directory")
     parser.add_argument("--datadir", type=str, default='data', help="data directory")
-    parser.add_argument("--filter", type=str, default='sobel', help="None, sobel, laplacian, canny")
+    parser.add_argument("--backbone", type=str, default='efficientnet-b7', help="Backbone for network")
 
     parser = Trainer.add_argparse_args(parser)
 
