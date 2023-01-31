@@ -172,14 +172,17 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             ), 
         )
              
-    def forward(self, figures, camfeat, meannum=2):
+    def forward(self, figures, camfeat, n_views=2):
+        samples = figures.shape[0] # 3
         # figfeat = torch.cat([figures, camfeat.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape)], dim=1)
         # clarity = self.clarity_net(figfeat)
         clarity = self.clarity_net(figures, camfeat * 180)[0].view(-1, 1, self.shape, self.shape, self.shape)
+        
         # Multiview can stack along batch dimension, last dimension is for X-ray
-        clarity_ct, clarity_xr = torch.split(clarity, meannum)
-        clarity_ct = clarity_ct.mean(dim=0, keepdim=True).repeat(meannum, 1, 1, 1, 1) 
+        clarity_ct, clarity_xr = torch.split(clarity, n_views)
+        clarity_ct = clarity_ct.mean(dim=0, keepdim=True)
         clarity = torch.cat([clarity_ct, clarity_xr])
+
         if self.pe > 0:
             density = self.density_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity], dim=1))
             mixture = self.mixture_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity, density], dim=1))
@@ -188,11 +191,15 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             density = self.density_net(torch.cat([clarity], dim=1))
             mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
             results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
-        
+
         if self.sh > 0:
             volumes = results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) 
         else:
             volumes = results 
+
+        volumes_ct, volumes_xr = torch.split(volumes, 1)
+        volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
+        volumes = torch.cat([volumes_ct, volumes_xr])
 
         return volumes
 
@@ -351,7 +358,7 @@ class PixelNeRVLightningModule(LightningModule):
                 image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, est_figure_xr_hidden])
             ), self.batch_size
         )
-        
+
         # Compute the loss
         im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random) \
                   + self.loss_smoothl1(image3d, est_volume_ct_locked) 
