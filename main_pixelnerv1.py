@@ -111,14 +111,14 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             down_block_types=(
                 "DownBlock2D",  
                 "DownBlock2D",
-                "DownBlock2D",  
+                "AttnDownBlock2D",  
                 "AttnDownBlock2D",
                 "AttnDownBlock2D",
             ),
             up_block_types=(
                 "AttnUpBlock2D",
                 "AttnUpBlock2D",
-                "UpBlock2D",    
+                "AttnUpBlock2D",    
                 "UpBlock2D",
                 "UpBlock2D",    
             ),
@@ -193,7 +193,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
 
         if self.sh > 0:
-            volumes = results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) 
+            volumes = results*self.shbasis.repeat(clarity.shape[0], 1, 1, 1, 1) 
         else:
             volumes = results 
 
