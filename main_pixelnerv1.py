@@ -172,11 +172,14 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             ), 
         )
              
-    def forward(self, figures, camfeat):
+    def forward(self, figures, camfeat, meannum=2):
         # figfeat = torch.cat([figures, camfeat.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape)], dim=1)
         # clarity = self.clarity_net(figfeat)
         clarity = self.clarity_net(figures, camfeat * 180)[0].view(-1, 1, self.shape, self.shape, self.shape)
-        clarity = clarity.mean(dim=0, keepdim=True).repeat(figures.shape[0], 1, 1, 1, 1) # Multiview can stack along batch dimension
+        # Multiview can stack along batch dimension, last dimension is for X-ray
+        clarity_ct, clarity_xr = torch.split(clarity, meannum)
+        clarity_ct = clarity_ct.mean(dim=0, keepdim=True).repeat(meannum, 1, 1, 1, 1) 
+        clarity = torch.cat([clarity_ct, clarity_xr])
         if self.pe > 0:
             density = self.density_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity], dim=1))
             mixture = self.mixture_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity, density], dim=1))
@@ -322,17 +325,14 @@ class PixelNeRVLightningModule(LightningModule):
 
         # Jointly estimate the volumes
         est_volume_ct_random, \
-        est_volume_ct_locked = torch.split(
+        est_volume_ct_locked, \
+        est_volume_xr_hidden = torch.split(
             self.forward_volume(
-                image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked]),
-                camfeat=torch.cat([     src_azim_random,      src_azim_locked]),
+                image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
+                camfeat=torch.cat([     src_azim_random,      src_azim_locked,      est_azim_hidden]),
             ), self.batch_size
         )  
-        est_volume_xr_hidden = self.forward_volume(
-                image2d=src_figure_xr_hidden,
-                camfeat=est_azim_hidden,
-            )
-
+        
         # Reconstruct the appropriate XR
         rec_figure_ct_random_random = self.forward_screen(image3d=est_volume_ct_random, cameras=camera_random)
         rec_figure_ct_random_locked = self.forward_screen(image3d=est_volume_ct_random, cameras=camera_locked)
@@ -347,13 +347,12 @@ class PixelNeRVLightningModule(LightningModule):
 
         # Reconstruct the camera locked
         est_azim_random, \
-        est_azim_locked = torch.split(
+        est_azim_locked, \
+        rec_azim_hidden = torch.split(
             self.forward_camera(
-                image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked])
+                image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, est_figure_xr_hidden_hidden])
             ), self.batch_size
         )
-        rec_azim_hidden = self.forward_camera(image2d=est_figure_xr_hidden_hidden)
-
         # Compute the loss
         im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random) \
                   + self.loss_smoothl1(image3d, est_volume_ct_locked) 
