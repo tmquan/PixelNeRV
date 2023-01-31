@@ -106,9 +106,10 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             in_channels=1,  
             out_channels=shape,
             layers_per_block=2,  # how many ResNet layers to use per UNet block
-            block_out_channels=backbones[backbone], #(32, 48, 80, 224, 640),  # More channels -> more parameters
+            block_out_channels=(32, 48, 80, 224, 640, 800), #(32, 48, 80, 224, 640),  # More channels -> more parameters
             norm_num_groups=16,
             down_block_types=(
+                "DownBlock2D",  
                 "DownBlock2D",  
                 "DownBlock2D",
                 "DownBlock2D",  
@@ -120,6 +121,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 "AttnUpBlock2D",
                 "UpBlock2D",    
                 "UpBlock2D",
+                "UpBlock2D",
                 "UpBlock2D",    
             ),
         )
@@ -129,8 +131,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=1+pe_channels,
                 out_channels=1,
-                channels=backbones[backbone], #(32, 48, 80, 224, 640),
-                strides=(2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640, 800), #(32, 48, 80, 224, 640),
+                strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
@@ -145,8 +147,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=2+pe_channels,
                 out_channels=1,
-                channels=backbones[backbone], #(32, 48, 80, 224, 640),
-                strides=(2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640, 800), #(32, 48, 80, 224, 640),
+                strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
@@ -161,8 +163,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=3+pe_channels,
                 out_channels=out_channels,
-                channels=backbones[backbone], #(32, 48, 80, 224, 640),
-                strides=(2, 2, 2, 2),
+                channels=(32, 48, 80, 224, 640, 800), #(32, 48, 80, 224, 640),
+                strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
