@@ -60,8 +60,8 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
             in_channels=in_channels,
             num_classes=out_channels,
         )
-        self.img_settings._fc.weight.data.zero_()
-        self.img_settings._fc.bias.data.zero_()
+        # self.img_settings._fc.weight.data.zero_()
+        # self.img_settings._fc.bias.data.zero_()
 
     def forward(self, figures):
         imgfeat = self.img_settings.forward(figures)
@@ -105,8 +105,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             sample_size=shape,  
             in_channels=1,  
             out_channels=shape,
-            layers_per_block=2,  # how many ResNet layers to use per UNet block
-            block_out_channels=(32, 48, 80, 224, 640, 800), #(32, 48, 80, 224, 640),  # More channels -> more parameters
+            layers_per_block=3,  # how many ResNet layers to use per UNet block
+            block_out_channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),  # More channels -> more parameters
             norm_num_groups=16,
             down_block_types=(
                 "DownBlock2D",  
@@ -114,10 +114,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 "DownBlock2D",
                 "AttnDownBlock2D",  
                 "AttnDownBlock2D",
-                "AttnDownBlock2D",
             ),
             up_block_types=(
-                "AttnUpBlock2D",
                 "AttnUpBlock2D",
                 "AttnUpBlock2D",    
                 "UpBlock2D",
@@ -131,9 +129,9 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=1+pe_channels,
                 out_channels=1,
-                channels=(32, 48, 80, 224, 640, 800), #(32, 48, 80, 224, 640),
+                channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2, 2),
-                num_res_units=2,
+                num_res_units=3,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
@@ -147,9 +145,9 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=2+pe_channels,
                 out_channels=1,
-                channels=(32, 48, 80, 224, 640, 800), #(32, 48, 80, 224, 640),
+                channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2, 2),
-                num_res_units=2,
+                num_res_units=3,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
@@ -163,9 +161,9 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=3+pe_channels,
                 out_channels=out_channels,
-                channels=(32, 48, 80, 224, 640, 800), #(32, 48, 80, 224, 640),
+                channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2, 2),
-                num_res_units=2,
+                num_res_units=3,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
@@ -235,6 +233,7 @@ def init_weights(net, init_type='normal', init_gain=0.02):
             nn.init.constant_(m.bias.data, 0.0)
     # print('initialize network with %s' % init_type)
     net.apply(init_func)  # apply the initialization function <init_func>
+
 def mean_and_tanh(x, eps=1e-8): return ( F.tanh(x.mean(dim=1, keepdim=True)) * 0.5 + 0.5 )  
 def mean_and_relu(x, eps=1e-8): return ( F.relu(x.mean(dim=1, keepdim=True)) )  
 
@@ -251,7 +250,6 @@ def make_cameras(dist, elev, azim):
 class PixelNeRVLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
         super().__init__()
-        self.logsdir = hparams.logsdir
         self.lr = hparams.lr
         self.cam = hparams.cam
         self.rng = hparams.rng
@@ -259,15 +257,19 @@ class PixelNeRVLightningModule(LightningModule):
         self.alpha = hparams.alpha
         self.gamma = hparams.gamma
         self.theta = hparams.theta
+       
+        self.logsdir = hparams.logsdir
+       
         self.st = hparams.st
         self.sh = hparams.sh
         self.pe = hparams.pe
+        
+        self.n_pts_per_ray = hparams.n_pts_per_ray
         self.weight_decay = hparams.weight_decay
         self.batch_size = hparams.batch_size
-        self.devices = hparams.devices
         self.backbone = hparams.backbone
-        self.n_pts_per_ray = hparams.n_pts_per_ray
-
+        self.devices = hparams.devices
+        
         self.save_hyperparameters()
     
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
@@ -293,7 +295,8 @@ class PixelNeRVLightningModule(LightningModule):
             backbone=self.backbone,
         )
 
-        # init_weights(self.inv_renderer, init_type="normal")
+        # init_weights(self.inv_renderer, init_type="xavier")
+        # init_weights(self.cam_settings, init_type="xavier")
         self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
 
     def forward_screen(self, image3d, cameras):      
