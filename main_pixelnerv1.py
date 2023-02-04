@@ -60,8 +60,8 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
             in_channels=in_channels,
             num_classes=out_channels,
         )
-        # self.img_settings._fc.weight.data.zero_()
-        # self.img_settings._fc.bias.data.zero_()
+        self.img_settings._fc.weight.data.zero_()
+        self.img_settings._fc.bias.data.zero_()
 
     def forward(self, figures):
         imgfeat = self.img_settings.forward(figures)
