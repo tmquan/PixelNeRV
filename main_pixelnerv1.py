@@ -252,7 +252,6 @@ class PixelNeRVLightningModule(LightningModule):
         super().__init__()
         self.lr = hparams.lr
         self.cam = hparams.cam
-        self.rng = hparams.rng
         self.shape = hparams.shape
         self.alpha = hparams.alpha
         self.gamma = hparams.gamma
@@ -314,7 +313,7 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
             
         # Construct the random cameras
-        src_azim_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.8, max=0.8) # 
+        src_azim_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.9, max=0.9) # 
         src_elev_random = torch.zeros(self.batch_size, device=_device) # 
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_random = make_cameras(src_dist_random, src_elev_random, src_azim_random)
@@ -486,19 +485,19 @@ if __name__ == "__main__":
     parser.add_argument("--pe", type=int, default=0, help="positional encoding (0 - 8)")
     
     parser.add_argument("--cam", action="store_true", help="train cam locked or hidden")
-    parser.add_argument("--rng", action="store_true", help="train with random volume")
     parser.add_argument("--amp", action="store_true", help="train with mixed precision or not")
     
     parser.add_argument("--alpha", type=float, default=1., help="vol loss")
     parser.add_argument("--gamma", type=float, default=1., help="img loss")
     parser.add_argument("--theta", type=float, default=1., help="cam loss")
-    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
+    
     parser.add_argument("--lr", type=float, default=2e-4, help="adam: learning rate")
     parser.add_argument("--ckpt", type=str, default=None, help="path to checkpoint")
     parser.add_argument("--logsdir", type=str, default='logsfrecaling', help="logging directory")
     parser.add_argument("--datadir", type=str, default='data', help="data directory")
     parser.add_argument("--backbone", type=str, default='efficientnet-b7', help="Backbone for network")
-
+    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
+    
     parser = Trainer.add_argparse_args(parser)
 
     # Collect the hyper parameters
