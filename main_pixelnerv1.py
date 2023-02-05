@@ -329,14 +329,18 @@ class PixelNeRVLightningModule(LightningModule):
            
         # Estimate camera_locked pose for XR
         src_figure_xr_hidden = image2d
-        est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden) if self.cam else torch.zeros(self.batch_size, device=_device) # 
+        rng_camera = torch.randint(low=0, high=2, size=(1, 1))
+        if stage=='train' and rng_camera == 0:
+            est_azim_hidden = torch.zeros(self.batch_size, device=_device) # 
+        else 
+            est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden) 
         est_elev_hidden = torch.zeros(self.batch_size, device=_device) # 
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_hidden = make_cameras(est_dist_hidden, est_elev_hidden, est_azim_hidden)
 
         # Jointly estimate the volumes, single view, random view and multiple views
-        rng = torch.randint(low=0, high=3, size=(1, 1))
-        if stage=='train' and rng == 1:
+        rng_figure = torch.randint(low=0, high=3, size=(1, 1))
+        if stage=='train' and rng_figure == 1:
             est_volume_ct_random, \
             est_volume_xr_hidden = torch.split(
                 self.forward_volume(
@@ -346,7 +350,7 @@ class PixelNeRVLightningModule(LightningModule):
                 ), self.batch_size
             )
             est_volume_ct_locked = est_volume_ct_random
-        elif stage=='train' and rng == 2:
+        elif stage=='train' and rng_figure == 2:
             est_volume_ct_locked, \
             est_volume_xr_hidden = torch.split(
                 self.forward_volume(
