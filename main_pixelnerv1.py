@@ -330,17 +330,18 @@ class PixelNeRVLightningModule(LightningModule):
         # Estimate camera_locked pose for XR
         src_figure_xr_hidden = image2d
         rng_camera = torch.randint(low=0, high=2, size=(1, 1))
-        if stage=='train' and rng_camera == 0:
-            est_azim_hidden = torch.zeros(self.batch_size, device=_device) # 
-        else 
-            est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden) 
+        # if stage=='train' and rng_camera==0:
+        #     est_azim_hidden = torch.zeros(self.batch_size, device=_device) # 
+        # else: 
+        #     est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden) 
+        est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden) 
         est_elev_hidden = torch.zeros(self.batch_size, device=_device) # 
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_hidden = make_cameras(est_dist_hidden, est_elev_hidden, est_azim_hidden)
 
         # Jointly estimate the volumes, single view, random view and multiple views
         rng_figure = torch.randint(low=0, high=3, size=(1, 1))
-        if stage=='train' and rng_figure == 1:
+        if stage=='train' and rng_figure==1:
             est_volume_ct_random, \
             est_volume_xr_hidden = torch.split(
                 self.forward_volume(
@@ -350,7 +351,7 @@ class PixelNeRVLightningModule(LightningModule):
                 ), self.batch_size
             )
             est_volume_ct_locked = est_volume_ct_random
-        elif stage=='train' and rng_figure == 2:
+        elif stage=='train' and rng_figure==2:
             est_volume_ct_locked, \
             est_volume_xr_hidden = torch.split(
                 self.forward_volume(
@@ -400,11 +401,12 @@ class PixelNeRVLightningModule(LightningModule):
 
         view_loss = self.loss_smoothl1(src_azim_random, est_azim_random) \
                   + self.loss_smoothl1(src_azim_locked, est_azim_locked) \
-                  + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) 
+                  + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) \
+                  + self.loss_smoothl1(src_azim_locked, est_azim_hidden) 
    
-        self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-        self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-        self.log(f'{stage}_view_loss', view_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        self.log(f'{stage}_view_loss', view_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
 
         # loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
         if optimizer_idx==0:
@@ -414,7 +416,7 @@ class PixelNeRVLightningModule(LightningModule):
         else:
             loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
 
-        if batch_idx == 0:
+        if batch_idx==0:
             viz2d = torch.cat([
                         torch.cat([image3d[..., self.shape//2, :], 
                                    est_figure_ct_locked,
