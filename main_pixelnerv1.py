@@ -314,7 +314,7 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
             
         # Construct the random cameras
-        src_azim_random = torch.randn(self.batch_size, device=_device) # 
+        src_azim_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.8, max=0.8) # 
         src_elev_random = torch.zeros(self.batch_size, device=_device) # 
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_random = make_cameras(src_dist_random, src_elev_random, src_azim_random)
@@ -330,7 +330,7 @@ class PixelNeRVLightningModule(LightningModule):
            
         # Estimate camera_locked pose for XR
         src_figure_xr_hidden = image2d
-        est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden)
+        est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden) if self.cam else torch.zeros(self.batch_size, device=_device) # 
         est_elev_hidden = torch.zeros(self.batch_size, device=_device) # 
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_hidden = make_cameras(est_dist_hidden, est_elev_hidden, est_azim_hidden)
