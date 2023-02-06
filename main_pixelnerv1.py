@@ -65,7 +65,7 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
 
     def forward(self, figures):
         imgfeat = self.img_settings.forward(figures)
-        return imgfeat.squeeze(1)
+        return F.tanh(imgfeat.squeeze(1))
 
 class PixelNeRVFrontToBackInverseRenderer(nn.Module):
     def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0, pe=8, backbone="efficientnet-b7"):
