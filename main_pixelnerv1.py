@@ -122,6 +122,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 "UpBlock2D",
                 "UpBlock2D",    
             ),
+            class_embed_type="timestep",
         )
 
         self.density_net = nn.Sequential(
@@ -172,11 +173,11 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             ), 
         )
              
-    def forward(self, figures, camfeat, n_views=2):
+    def forward(self, figures, azim, elev, n_views=2):
         samples = figures.shape[0] # 3
-        # figfeat = torch.cat([figures, camfeat.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape)], dim=1)
+        # figfeat = torch.cat([figures, azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape)], dim=1)
         # clarity = self.clarity_net(figfeat)
-        clarity = self.clarity_net(figures, camfeat * 180)[0].view(-1, 1, self.shape, self.shape, self.shape)
+        clarity = self.clarity_net(figures, azim * 180, elev*90)[0].view(-1, 1, self.shape, self.shape, self.shape)
         
         # Multiview can stack along batch dimension, last dimension is for X-ray
         clarity_ct, clarity_xr = torch.split(clarity, n_views)
@@ -290,19 +291,19 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.cam_settings = PixelNeRVFrontToBackFrustumFeaturer(
             in_channels=1, 
-            out_channels=1,
+            out_channels=2,
             backbone=self.backbone,
         )
 
         # init_weights(self.inv_renderer, init_type="xavier")
         # init_weights(self.cam_settings, init_type="xavier")
-        self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
+        self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.05)
 
     def forward_screen(self, image3d, cameras):      
         return self.fwd_renderer(image3d, cameras) 
 
-    def forward_volume(self, image2d, camfeat, n_views=2):      
-        return self.inv_renderer(image2d * 2.0 - 1.0, camfeat, n_views) 
+    def forward_volume(self, image2d, azim, elev, n_views=2):      
+        return self.inv_renderer(image2d * 2.0 - 1.0, azim.squeeze(), elev.squeeze(), n_views) 
 
     def forward_camera(self, image2d):
         return self.cam_settings(image2d * 2.0 - 1.0)
@@ -314,7 +315,7 @@ class PixelNeRVLightningModule(LightningModule):
             
         # Construct the random cameras
         src_azim_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.9, max=0.9) # 
-        src_elev_random = torch.zeros(self.batch_size, device=_device) # 
+        src_elev_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.9, max=0.9) # 
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_random = make_cameras(src_dist_random, src_elev_random, src_azim_random)
         
@@ -329,16 +330,11 @@ class PixelNeRVLightningModule(LightningModule):
            
         # Estimate camera_locked pose for XR
         src_figure_xr_hidden = image2d
-        rng_camera = torch.randint(low=0, high=2, size=(1, 1))
-        # if stage=='train' and rng_camera==0:
-        #     est_azim_hidden = torch.zeros(self.batch_size, device=_device) # 
-        # else: 
-        #     est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden) 
-        est_azim_hidden = self.forward_camera(image2d=src_figure_xr_hidden) 
-        est_elev_hidden = torch.zeros(self.batch_size, device=_device) # 
+        est_frus_hidden = self.forward_camera(image2d=src_figure_xr_hidden) 
+        est_azim_hidden, est_elev_hidden = torch.split(est_frus_hidden, 1, dim=1)
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_hidden = make_cameras(est_dist_hidden, est_elev_hidden, est_azim_hidden)
-
+        cam_view = [self.batch_size, 1]
         # Jointly estimate the volumes, single view, random view and multiple views
         rng_figure = torch.randint(low=0, high=3, size=(1, 1))
         if stage=='train' and rng_figure==1:
@@ -346,7 +342,8 @@ class PixelNeRVLightningModule(LightningModule):
             est_volume_xr_hidden = torch.split(
                 self.forward_volume(
                     image2d=torch.cat([est_figure_ct_random, src_figure_xr_hidden]),
-                    camfeat=torch.cat([     src_azim_random,      est_azim_hidden]),
+                    azim=torch.cat([src_azim_random.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([src_elev_random.view(cam_view), est_elev_hidden.view(cam_view)]),
                     n_views=1
                 ), self.batch_size
             )
@@ -356,7 +353,8 @@ class PixelNeRVLightningModule(LightningModule):
             est_volume_xr_hidden = torch.split(
                 self.forward_volume(
                     image2d=torch.cat([est_figure_ct_locked, src_figure_xr_hidden]),
-                    camfeat=torch.cat([     src_azim_locked,      est_azim_hidden]),
+                    azim=torch.cat([src_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([src_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
                     n_views=1
                 ), self.batch_size
             )
@@ -367,7 +365,8 @@ class PixelNeRVLightningModule(LightningModule):
             est_volume_xr_hidden = torch.split(
                 self.forward_volume(
                     image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
-                    camfeat=torch.cat([     src_azim_random,      src_azim_locked,      est_azim_hidden]),
+                    azim=torch.cat([src_azim_random.view(cam_view), src_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([src_elev_random.view(cam_view), src_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
                     n_views=2,
                 ), self.batch_size
             )   
@@ -383,13 +382,18 @@ class PixelNeRVLightningModule(LightningModule):
         est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
 
         # Reconstruct the camera locked
-        est_azim_random, \
-        est_azim_locked, \
-        rec_azim_hidden = torch.split(
+        est_frus_random, \
+        est_frus_locked, \
+        rec_frus_hidden = torch.split(
             self.forward_camera(
                 image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, est_figure_xr_hidden])
             ), self.batch_size
         )
+
+        est_azim_hidden, est_elev_hidden = torch.split(est_frus_hidden, 1, dim=1)
+        est_azim_random, est_elev_random = torch.split(est_frus_random, 1, dim=1)
+        est_azim_locked, est_elev_locked = torch.split(est_frus_locked, 1, dim=1)
+        rec_azim_hidden, rec_elev_hidden = torch.split(rec_frus_hidden, 1, dim=1)
 
         # Compute the loss
         im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random) \
@@ -402,7 +406,11 @@ class PixelNeRVLightningModule(LightningModule):
         view_loss = self.loss_smoothl1(src_azim_random, est_azim_random) \
                   + self.loss_smoothl1(src_azim_locked, est_azim_locked) \
                   + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) \
-                  + self.loss_smoothl1(src_azim_locked, est_azim_hidden) 
+                  + self.loss_smoothl1(src_azim_locked, est_azim_hidden) \
+                  + self.loss_smoothl1(src_elev_random, est_elev_random) \
+                  + self.loss_smoothl1(src_elev_locked, est_elev_locked) \
+                  + self.loss_smoothl1(est_elev_hidden, rec_elev_hidden) \
+                  + self.loss_smoothl1(src_elev_locked, est_elev_hidden) 
    
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
@@ -444,10 +452,10 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_step(batch, batch_idx, optimizer_idx, stage='train')
 
     def validation_step(self, batch, batch_idx):
-        return self._common_step(batch, batch_idx, optimizer_idx=0, stage='validation')
+        return self._common_step(batch, batch_idx, optimizer_idx=-1, stage='validation')
 
     def test_step(self, batch, batch_idx):
-        return self._common_step(batch, batch_idx, optimizer_idx=0, stage='test')
+        return self._common_step(batch, batch_idx, optimizer_idx=-1, stage='test')
 
     def _common_epoch_end(self, outputs, stage: Optional[str] = 'common'):
         loss = torch.stack([x[f'loss'] for x in outputs]).mean()
