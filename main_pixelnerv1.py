@@ -177,7 +177,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         samples = figures.shape[0] # 3
         # figfeat = torch.cat([figures, azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape)], dim=1)
         # clarity = self.clarity_net(figfeat)
-        clarity = self.clarity_net(figures, azim * 180, elev*90)[0].view(-1, 1, self.shape, self.shape, self.shape)
+        clarity = self.clarity_net(figures, azim * 2000, elev*2000)[0].view(-1, 1, self.shape, self.shape, self.shape)
         
         # Multiview can stack along batch dimension, last dimension is for X-ray
         clarity_ct, clarity_xr = torch.split(clarity, n_views)
@@ -330,11 +330,14 @@ class PixelNeRVLightningModule(LightningModule):
            
         # Estimate camera_locked pose for XR
         src_figure_xr_hidden = image2d
+       
+        # with torch.no_grad():
         est_frus_hidden = self.forward_camera(image2d=src_figure_xr_hidden) 
         est_azim_hidden, est_elev_hidden = torch.split(est_frus_hidden, 1, dim=1)
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_hidden = make_cameras(est_dist_hidden, est_elev_hidden, est_azim_hidden)
         cam_view = [self.batch_size, 1]
+        
         # Jointly estimate the volumes, single view, random view and multiple views
         rng_figure = torch.randint(low=0, high=3, size=(1, 1))
         if stage=='train' and rng_figure==1:
@@ -406,11 +409,9 @@ class PixelNeRVLightningModule(LightningModule):
         view_loss = self.loss_smoothl1(src_azim_random, est_azim_random) \
                   + self.loss_smoothl1(src_azim_locked, est_azim_locked) \
                   + self.loss_smoothl1(est_azim_hidden, rec_azim_hidden) \
-                  + self.loss_smoothl1(src_azim_locked, est_azim_hidden) \
                   + self.loss_smoothl1(src_elev_random, est_elev_random) \
                   + self.loss_smoothl1(src_elev_locked, est_elev_locked) \
-                  + self.loss_smoothl1(est_elev_hidden, rec_elev_hidden) \
-                  + self.loss_smoothl1(src_elev_locked, est_elev_hidden) 
+                  + self.loss_smoothl1(est_elev_hidden, rec_elev_hidden) 
    
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
