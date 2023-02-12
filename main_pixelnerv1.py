@@ -24,6 +24,7 @@ from pytorch_lightning.utilities.seed import seed_everything
 # from lightning_fabric.utilities.seed import seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import StochasticWeightAveraging
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer, LightningModule
 from argparse import ArgumentParser
@@ -535,7 +536,7 @@ if __name__ == "__main__":
 
     # Logger
     tensorboard_logger = TensorBoardLogger(save_dir=hparams.logsdir, log_graph=True)
-
+    swa_callback = StochasticWeightAveraging(swa_lrs=1e-2)
     # Init model with callbacks
     trainer = Trainer.from_argparse_args(
         hparams,
@@ -544,10 +545,11 @@ if __name__ == "__main__":
         callbacks=[
             lr_callback,
             checkpoint_callback,
+            swa_callback
         ],
-        # accumulate_grad_batches=4,
+        accumulate_grad_batches=5,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
-        strategy="fsdp",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        strategy="ddp_sharded",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16 if hparams.amp else 32,
         # stochastic_weight_avg=True,
         # deterministic=False,
