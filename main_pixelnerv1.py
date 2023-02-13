@@ -61,8 +61,8 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
             in_channels=in_channels,
             num_classes=out_channels,
         )
-        self.img_settings._fc.weight.data.zero_()
-        self.img_settings._fc.bias.data.zero_()
+        # self.img_settings._fc.weight.data.zero_()
+        # self.img_settings._fc.bias.data.zero_()
 
     def forward(self, figures):
         imgfeat = self.img_settings.forward(figures)
@@ -298,13 +298,15 @@ class PixelNeRVLightningModule(LightningModule):
 
         init_weights(self.inv_renderer, init_type="xavier")
         init_weights(self.cam_settings, init_type="xavier")
+        self.cam_settings.img_settings._fc.weight.data.zero_()
+        self.cam_settings.img_settings._fc.bias.data.zero_()
         self.loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras):      
         return self.fwd_renderer(image3d, cameras) 
 
     def forward_volume(self, image2d, azim, elev, n_views=2):      
-        return self.inv_renderer(image2d * 2.0 - 1.0, azim.squeeze(), elev.squeeze(), n_views) * 0.5 + 0.5
+        return self.inv_renderer(image2d * 2.0 - 1.0, azim.squeeze(), elev.squeeze(), n_views) 
 
     def forward_camera(self, image2d):
         return self.cam_settings(image2d * 2.0 - 1.0)
@@ -315,8 +317,8 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
             
         # Construct the random cameras
-        src_azim_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.9, max=0.9) # 
-        src_elev_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.9, max=0.9) # 
+        src_azim_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.8, max=0.8) # 
+        src_elev_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.8, max=0.8) # 
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_random = make_cameras(src_dist_random, src_elev_random, src_azim_random)
         
@@ -331,14 +333,29 @@ class PixelNeRVLightningModule(LightningModule):
            
         # Estimate camera_locked pose for XR
         src_figure_xr_hidden = image2d
-       
-        # with torch.no_grad():
-        est_frus_hidden = self.forward_camera(image2d=src_figure_xr_hidden) 
-        est_azim_hidden, est_elev_hidden = torch.split(est_frus_hidden, 1, dim=1)
+
+        est_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
+        est_dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
-        camera_hidden = make_cameras(est_dist_hidden, est_elev_hidden, est_azim_hidden)
-        cam_view = [self.batch_size, 1]
         
+        # Reconstruct the cameras
+        est_frus_random, \
+        est_frus_locked, \
+        est_frus_hidden = torch.split(
+            self.forward_camera(
+                image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden])
+            ), self.batch_size
+        )
+
+        est_azim_random, est_elev_random = torch.split(est_frus_random, 1, dim=1)
+        est_azim_locked, est_elev_locked = torch.split(est_frus_locked, 1, dim=1)
+        est_azim_hidden, est_elev_hidden = torch.split(est_frus_hidden, 1, dim=1)
+
+        camera_random = make_cameras(est_dist_random, est_elev_random, est_azim_random)
+        camera_locked = make_cameras(est_dist_locked, est_elev_locked, est_azim_locked)
+        camera_hidden = make_cameras(est_dist_hidden, est_elev_hidden, est_azim_hidden)
+
+        cam_view = [self.batch_size, 1]       
         # Jointly estimate the volumes, single view, random view and multiple views
         rng_figure = torch.randint(low=0, high=3, size=(1, 1))
         if stage=='train' and rng_figure==1:
@@ -346,8 +363,8 @@ class PixelNeRVLightningModule(LightningModule):
             est_volume_xr_hidden = torch.split(
                 self.forward_volume(
                     image2d=torch.cat([est_figure_ct_random, src_figure_xr_hidden]),
-                    azim=torch.cat([src_azim_random.view(cam_view), est_azim_hidden.view(cam_view)]),
-                    elev=torch.cat([src_elev_random.view(cam_view), est_elev_hidden.view(cam_view)]),
+                    azim=torch.cat([est_azim_random.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([est_elev_random.view(cam_view), est_elev_hidden.view(cam_view)]),
                     n_views=1
                 ), self.batch_size
             )
@@ -357,8 +374,8 @@ class PixelNeRVLightningModule(LightningModule):
             est_volume_xr_hidden = torch.split(
                 self.forward_volume(
                     image2d=torch.cat([est_figure_ct_locked, src_figure_xr_hidden]),
-                    azim=torch.cat([src_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
-                    elev=torch.cat([src_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
+                    azim=torch.cat([est_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([est_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
                     n_views=1
                 ), self.batch_size
             )
@@ -369,35 +386,24 @@ class PixelNeRVLightningModule(LightningModule):
             est_volume_xr_hidden = torch.split(
                 self.forward_volume(
                     image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
-                    azim=torch.cat([src_azim_random.view(cam_view), src_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
-                    elev=torch.cat([src_elev_random.view(cam_view), src_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
+                    azim=torch.cat([est_azim_random.view(cam_view), est_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([est_elev_random.view(cam_view), est_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
                     n_views=2,
                 ), self.batch_size
             )   
-        
+           
         # Reconstruct the appropriate XR
         rec_figure_ct_random = self.forward_screen(image3d=est_volume_ct_random, cameras=camera_random)
         rec_figure_ct_locked = self.forward_screen(image3d=est_volume_ct_locked, cameras=camera_locked)
         est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden, cameras=camera_hidden)
         
+        # rec_frus_hidden = self.forward_camera(image2d=est_figure_xr_hidden)
+        # rec_azim_hidden, rec_elev_hidden = torch.split(rec_frus_hidden, 1, dim=1)
+
         # Perform Post activation like DVGO
         est_volume_ct_random = est_volume_ct_random.sum(dim=1, keepdim=True)
         est_volume_ct_locked = est_volume_ct_locked.sum(dim=1, keepdim=True)
         est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
-
-        # Reconstruct the camera locked
-        est_frus_random, \
-        est_frus_locked, \
-        rec_frus_hidden = torch.split(
-            self.forward_camera(
-                image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, est_figure_xr_hidden])
-            ), self.batch_size
-        )
-
-        est_azim_hidden, est_elev_hidden = torch.split(est_frus_hidden, 1, dim=1)
-        est_azim_random, est_elev_random = torch.split(est_frus_random, 1, dim=1)
-        est_azim_locked, est_elev_locked = torch.split(est_frus_locked, 1, dim=1)
-        rec_azim_hidden, rec_elev_hidden = torch.split(rec_frus_hidden, 1, dim=1)
 
         # Compute the loss
         im3d_loss = self.loss(image3d, est_volume_ct_random) \
@@ -407,12 +413,17 @@ class PixelNeRVLightningModule(LightningModule):
                   + self.loss(est_figure_ct_locked, rec_figure_ct_locked) \
                   + self.loss(src_figure_xr_hidden, est_figure_xr_hidden) 
 
+        # view_loss = self.loss(src_azim_random, est_azim_random) \
+        #           + self.loss(src_azim_locked, est_azim_locked) \
+        #           + self.loss(est_azim_hidden, rec_azim_hidden) \
+        #           + self.loss(src_elev_random, est_elev_random) \
+        #           + self.loss(src_elev_locked, est_elev_locked) \
+        #           + self.loss(est_elev_hidden, rec_elev_hidden) 
+
         view_loss = self.loss(src_azim_random, est_azim_random) \
                   + self.loss(src_azim_locked, est_azim_locked) \
-                  + self.loss(est_azim_hidden, rec_azim_hidden) \
                   + self.loss(src_elev_random, est_elev_random) \
-                  + self.loss(src_elev_locked, est_elev_locked) \
-                  + self.loss(est_elev_hidden, rec_elev_hidden) 
+                  + self.loss(src_elev_locked, est_elev_locked) 
    
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
