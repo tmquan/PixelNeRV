@@ -60,6 +60,7 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
             spatial_dims=2,
             in_channels=in_channels,
             num_classes=out_channels,
+            adv_prop=True,
         )
         # self.img_settings._fc.weight.data.zero_()
         # self.img_settings._fc.bias.data.zero_()
@@ -296,10 +297,8 @@ class PixelNeRVLightningModule(LightningModule):
             backbone=self.backbone,
         )
 
-        init_weights(self.inv_renderer, init_type="xavier")
-        init_weights(self.cam_settings, init_type="xavier")
-        self.cam_settings.img_settings._fc.weight.data.zero_()
-        self.cam_settings.img_settings._fc.bias.data.zero_()
+        # init_weights(self.inv_renderer, init_type="xavier")
+        # init_weights(self.cam_settings, init_type="xavier")
         self.loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras):      
@@ -558,9 +557,9 @@ if __name__ == "__main__":
             checkpoint_callback,
             swa_callback
         ],
-        accumulate_grad_batches=5,
+        accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
-        strategy="ddp_sharded",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        strategy="ddp",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         precision=16 if hparams.amp else 32,
         # stochastic_weight_avg=True,
         # deterministic=False,
