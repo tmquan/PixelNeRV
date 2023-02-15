@@ -20,8 +20,8 @@ from pytorch3d.renderer.cameras import (
 )
 
 from diffusers import UNet2DModel
-from pytorch_lightning.utilities.seed import seed_everything
-# from lightning_fabric.utilities.seed import seed_everything
+# from pytorch_lightning.utilities.seed import seed_everything
+from lightning_fabric.utilities.seed import seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks import StochasticWeightAveraging
@@ -561,7 +561,8 @@ if __name__ == "__main__":
         ],
         accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
-        strategy="ddp",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        strategy="ddp_find_unused_parameters_false",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        # plugins=DDPStrategy(find_unused_parameters=False),
         precision=16 if hparams.amp else 32,
         # stochastic_weight_avg=True,
         # deterministic=False,
