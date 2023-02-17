@@ -62,8 +62,8 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
             num_classes=out_channels,
             adv_prop=True,
         )
-        # self.img_settings._fc.weight.data.zero_()
-        # self.img_settings._fc.bias.data.zero_()
+        self.img_settings._fc.weight.data.zero_()
+        self.img_settings._fc.bias.data.zero_()
 
     def forward(self, figures):
         imgfeat = self.img_settings.forward(figures)
@@ -139,7 +139,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.4,
+                # dropout=0.5,
             ),
         )
 
@@ -155,7 +155,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.4,
+                # dropout=0.5,
             ),
         )
 
@@ -171,7 +171,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.4,
+                dropout=0.5,
             ), 
         )
              
