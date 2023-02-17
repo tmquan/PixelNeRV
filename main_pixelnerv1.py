@@ -297,8 +297,8 @@ class PixelNeRVLightningModule(LightningModule):
             backbone=self.backbone,
         )
 
-        init_weights(self.inv_renderer, init_type="normal")
-        init_weights(self.cam_settings, init_type="normal")
+        # init_weights(self.inv_renderer, init_type="normal")
+        # init_weights(self.cam_settings, init_type="normal")
         self.loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras):      
