@@ -427,9 +427,9 @@ class PixelNeRVLightningModule(LightningModule):
         #           + self.loss(src_elev_locked, est_elev_locked) 
 
         view_loss = self.loss(torch.cat([src_azim_random, src_elev_random]), 
-                              torch.cat([est_azim_random, est_elev_random)) \
+                              torch.cat([est_azim_random, est_elev_random]) \
                   + self.loss(torch.cat([src_azim_locked, src_elev_locked]), 
-                              torch.cat([est_azim_locked, est_elev_locked)) 
+                              torch.cat([est_azim_locked, est_elev_locked]) 
    
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
