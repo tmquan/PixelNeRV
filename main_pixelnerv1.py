@@ -412,7 +412,7 @@ class PixelNeRVLightningModule(LightningModule):
     
         im2d_loss = self.loss(est_figure_ct_random, rec_figure_ct_random) \
                   + self.loss(est_figure_ct_locked, rec_figure_ct_locked) \
-                  + self.loss(src_figure_xr_hidden, est_figure_xr_hidden) 
+                  + self.loss(src_figure_xr_hidden, est_figure_xr_hidden) * 2 
 
         # view_loss = self.loss(src_azim_random, est_azim_random) \
         #           + self.loss(src_azim_locked, est_azim_locked) \
