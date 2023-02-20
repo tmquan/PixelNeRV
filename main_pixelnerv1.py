@@ -420,7 +420,7 @@ class PixelNeRVLightningModule(LightningModule):
         # im3d_loss = self.loss(torch.cat([image3d, image3d]), torch.cat([mid_volume_ct_random, est_volume_ct_random])) \
         #           + self.loss(torch.cat([image3d, image3d]), torch.cat([mid_volume_ct_locked, est_volume_ct_locked])) 
         im3d_loss = self.loss(image3d, mid_volume_ct_random) \
-                  + self.loss(image3d, mid_volume_ct_locked) \ 
+                  + self.loss(image3d, mid_volume_ct_locked) \
                   + self.loss(image3d, est_volume_ct_random) \
                   + self.loss(image3d, est_volume_ct_locked) 
     
