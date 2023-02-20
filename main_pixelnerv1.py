@@ -358,49 +358,49 @@ class PixelNeRVLightningModule(LightningModule):
 
         cam_view = [self.batch_size, 1]       
         # Jointly estimate the volumes, single view, random view and multiple views
-        # rng_figure = torch.randint(low=0, high=3, size=(1, 1))
-        # if stage=='train' and rng_figure==1:
-        #     est_volume_ct_random, \
-        #     est_volume_xr_hidden = torch.split(
-        #         self.forward_volume(
-        #             image2d=torch.cat([est_figure_ct_random, src_figure_xr_hidden]),
-        #             azim=torch.cat([est_azim_random.view(cam_view), est_azim_hidden.view(cam_view)]),
-        #             elev=torch.cat([est_elev_random.view(cam_view), est_elev_hidden.view(cam_view)]),
-        #             n_views=1
-        #         ), self.batch_size
-        #     )
-        #     est_volume_ct_locked = est_volume_ct_random
-        # elif stage=='train' and rng_figure==2:
-        #     est_volume_ct_locked, \
-        #     est_volume_xr_hidden = torch.split(
-        #         self.forward_volume(
-        #             image2d=torch.cat([est_figure_ct_locked, src_figure_xr_hidden]),
-        #             azim=torch.cat([est_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
-        #             elev=torch.cat([est_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
-        #             n_views=1
-        #         ), self.batch_size
-        #     )
-        #     est_volume_ct_random = est_volume_ct_locked
-        # else:
-        #     est_volume_ct_random, \
-        #     est_volume_ct_locked, \
-        #     est_volume_xr_hidden = torch.split(
-        #         self.forward_volume(
-        #             image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
-        #             azim=torch.cat([est_azim_random.view(cam_view), est_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
-        #             elev=torch.cat([est_elev_random.view(cam_view), est_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
-        #             n_views=2,
-        #         ), self.batch_size
-        #     )   
-        est_volume_ct_random, \
-        est_volume_ct_locked, \
-        est_volume_xr_hidden = torch.split(
-            self.forward_volume(
-                image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
-                azim=torch.cat([est_azim_random.view(cam_view), est_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
-                elev=torch.cat([est_elev_random.view(cam_view), est_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
-            ), self.batch_size
-        )   
+        rng_figure = torch.randint(low=0, high=3, size=(1, 1))
+        if stage=='train' and rng_figure==1:
+            est_volume_ct_random, \
+            est_volume_xr_hidden = torch.split(
+                self.forward_volume(
+                    image2d=torch.cat([est_figure_ct_random, src_figure_xr_hidden]),
+                    azim=torch.cat([est_azim_random.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([est_elev_random.view(cam_view), est_elev_hidden.view(cam_view)]),
+                    n_views=1
+                ), self.batch_size
+            )
+            est_volume_ct_locked = est_volume_ct_random
+        elif stage=='train' and rng_figure==2:
+            est_volume_ct_locked, \
+            est_volume_xr_hidden = torch.split(
+                self.forward_volume(
+                    image2d=torch.cat([est_figure_ct_locked, src_figure_xr_hidden]),
+                    azim=torch.cat([est_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([est_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
+                    n_views=1
+                ), self.batch_size
+            )
+            est_volume_ct_random = est_volume_ct_locked
+        else:
+            est_volume_ct_random, \
+            est_volume_ct_locked, \
+            est_volume_xr_hidden = torch.split(
+                self.forward_volume(
+                    image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
+                    azim=torch.cat([est_azim_random.view(cam_view), est_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([est_elev_random.view(cam_view), est_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
+                    n_views=2,
+                ), self.batch_size
+            )   
+        # est_volume_ct_random, \
+        # est_volume_ct_locked, \
+        # est_volume_xr_hidden = torch.split(
+        #     self.forward_volume(
+        #         image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
+        #         azim=torch.cat([est_azim_random.view(cam_view), est_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
+        #         elev=torch.cat([est_elev_random.view(cam_view), est_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
+        #     ), self.batch_size
+        # )   
 
         # Reconstruct the appropriate XR
         rec_figure_ct_random = self.forward_screen(image3d=est_volume_ct_random, cameras=camera_random)
