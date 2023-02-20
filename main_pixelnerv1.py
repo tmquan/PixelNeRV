@@ -134,7 +134,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 out_channels=1,
                 channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2, 2),
-                # num_res_units=1,
+                num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
                 # act=("LeakyReLU", {"inplace": True}),
@@ -150,7 +150,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 out_channels=1,
                 channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2, 2),
-                # num_res_units=1,
+                num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
                 # act=("LeakyReLU", {"inplace": True}),
@@ -166,7 +166,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 out_channels=out_channels,
                 channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2, 2),
-                # num_res_units=1,
+                num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
                 # act=("LeakyReLU", {"inplace": True}),
@@ -203,7 +203,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         # volumes_ct, volumes_xr = torch.split(volumes, 1)
         # volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
         # volumes = torch.cat([volumes_ct, volumes_xr])
-        volumes = volumes + clarity.expand(volumes.shape)
+        # volumes = volumes + clarity.expand(volumes.shape)
+        # volumes = torch.cat([clarity, volumes], dim=1) 
         return torch.cat([clarity, volumes], dim=1) 
 
 
@@ -408,20 +409,26 @@ class PixelNeRVLightningModule(LightningModule):
         est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden, cameras=camera_hidden)
 
         # Perform Post activation like DVGO
-        mid_volume_ct_random = est_volume_ct_random[:,:1].sum(dim=1, keepdim=True)
-        mid_volume_ct_locked = est_volume_ct_locked[:,:1].sum(dim=1, keepdim=True)
-        mid_volume_xr_hidden = est_volume_xr_hidden[:,:1].sum(dim=1, keepdim=True)
+        # mid_volume_ct_random = est_volume_ct_random[:,:1].sum(dim=1, keepdim=True)
+        # mid_volume_ct_locked = est_volume_ct_locked[:,:1].sum(dim=1, keepdim=True)
+        # mid_volume_xr_hidden = est_volume_xr_hidden[:,:1].sum(dim=1, keepdim=True)
 
-        est_volume_ct_random = est_volume_ct_random[:,1:].sum(dim=1, keepdim=True)
-        est_volume_ct_locked = est_volume_ct_locked[:,1:].sum(dim=1, keepdim=True)
-        est_volume_xr_hidden = est_volume_xr_hidden[:,1:].sum(dim=1, keepdim=True)
+        # est_volume_ct_random = est_volume_ct_random[:,1:].sum(dim=1, keepdim=True)
+        # est_volume_ct_locked = est_volume_ct_locked[:,1:].sum(dim=1, keepdim=True)
+        # est_volume_xr_hidden = est_volume_xr_hidden[:,1:].sum(dim=1, keepdim=True)
+
+        est_volume_ct_random = est_volume_ct_random.sum(dim=1, keepdim=True)
+        est_volume_ct_locked = est_volume_ct_locked.sum(dim=1, keepdim=True)
+        est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
 
         # Compute the loss
         # im3d_loss = self.loss(torch.cat([image3d, image3d]), torch.cat([mid_volume_ct_random, est_volume_ct_random])) \
         #           + self.loss(torch.cat([image3d, image3d]), torch.cat([mid_volume_ct_locked, est_volume_ct_locked])) 
-        im3d_loss = self.loss(image3d, mid_volume_ct_random) \
-                  + self.loss(image3d, mid_volume_ct_locked) \
-                  + self.loss(image3d, est_volume_ct_random) \
+        # im3d_loss = self.loss(image3d, mid_volume_ct_random) \
+        #           + self.loss(image3d, mid_volume_ct_locked) \
+        #           + self.loss(image3d, est_volume_ct_random) \
+        #           + self.loss(image3d, est_volume_ct_locked) 
+        im3d_loss = self.loss(image3d, est_volume_ct_random) \
                   + self.loss(image3d, est_volume_ct_locked) 
     
         im2d_loss = self.loss(est_figure_ct_random, rec_figure_ct_random) \
