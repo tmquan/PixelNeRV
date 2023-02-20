@@ -137,7 +137,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
-                # act=("LeakyReLU", {"inplace": True}),
+                act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
                 dropout=0.5,
             ),
@@ -153,7 +153,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
-                # act=("LeakyReLU", {"inplace": True}),
+                act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
                 dropout=0.5,
             ),
@@ -169,7 +169,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
-                # act=("LeakyReLU", {"inplace": True}),
+                act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
                 dropout=0.5,
             ), 
@@ -179,12 +179,12 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         samples = figures.shape[0] # 3
         # figfeat = torch.cat([figures, azim.view(-1, 1, 1, 1).repeat(1, 1, self.shape, self.shape)], dim=1)
         # clarity = self.clarity_net(figfeat)
-        clarity = self.clarity_net(figures, azim * 1000, elev*2000)[0].view(-1, 1, self.shape, self.shape, self.shape)
+        clarity = self.clarity_net(figures, azim*1000, elev*2000)[0].view(-1, 1, self.shape, self.shape, self.shape)
         
-        # # Multiview can stack along batch dimension, last dimension is for X-ray
-        # clarity_ct, clarity_xr = torch.split(clarity, n_views)
-        # clarity_ct = clarity_ct.mean(dim=0, keepdim=True)
-        # clarity = torch.cat([clarity_ct, clarity_xr])
+        # Multiview can stack along batch dimension, last dimension is for X-ray
+        clarity_ct, clarity_xr = torch.split(clarity, n_views)
+        clarity_ct = clarity_ct.mean(dim=0, keepdim=True)
+        clarity = torch.cat([clarity_ct, clarity_xr])
 
         if self.pe > 0:
             density = self.density_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity], dim=1))
@@ -196,16 +196,16 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
 
         if self.sh > 0:
-            volumes = (results)*self.shbasis.repeat(clarity.shape[0], 1, 1, 1, 1) 
+            volumes = results*self.shbasis.repeat(clarity.shape[0], 1, 1, 1, 1) 
         else:
-            volumes = (results) 
+            volumes = results 
 
-        # volumes_ct, volumes_xr = torch.split(volumes, 1)
-        # volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
-        # volumes = torch.cat([volumes_ct, volumes_xr])
-        # volumes = volumes + clarity.expand(volumes.shape)
-        # volumes = torch.cat([clarity, volumes], dim=1) 
-        return torch.cat([clarity, volumes], dim=1) 
+        volumes = torch.cat([clarity, volumes], dim=1)
+        volumes_ct, volumes_xr = torch.split(volumes, 1)
+        volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
+        volumes = torch.cat([volumes_ct, volumes_xr])
+
+        return volumes
 
 
 def init_weights(net, init_type='normal', init_gain=0.02):
@@ -393,41 +393,21 @@ class PixelNeRVLightningModule(LightningModule):
                     n_views=2,
                 ), self.batch_size
             )   
-        # est_volume_ct_random, \
-        # est_volume_ct_locked, \
-        # est_volume_xr_hidden = torch.split(
-        #     self.forward_volume(
-        #         image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
-        #         azim=torch.cat([est_azim_random.view(cam_view), est_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
-        #         elev=torch.cat([est_elev_random.view(cam_view), est_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
-        #     ), self.batch_size
-        # )   
-
+           
         # Reconstruct the appropriate XR
         rec_figure_ct_random = self.forward_screen(image3d=est_volume_ct_random, cameras=camera_random)
         rec_figure_ct_locked = self.forward_screen(image3d=est_volume_ct_locked, cameras=camera_locked)
         est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden, cameras=camera_hidden)
+        
+        # rec_feat_hidden = self.forward_camera(image2d=est_figure_xr_hidden)
+        # rec_azim_hidden, rec_elev_hidden = torch.split(rec_feat_hidden, 1, dim=1)
 
         # Perform Post activation like DVGO
-        # mid_volume_ct_random = est_volume_ct_random[:,:1].sum(dim=1, keepdim=True)
-        # mid_volume_ct_locked = est_volume_ct_locked[:,:1].sum(dim=1, keepdim=True)
-        # mid_volume_xr_hidden = est_volume_xr_hidden[:,:1].sum(dim=1, keepdim=True)
-
-        # est_volume_ct_random = est_volume_ct_random[:,1:].sum(dim=1, keepdim=True)
-        # est_volume_ct_locked = est_volume_ct_locked[:,1:].sum(dim=1, keepdim=True)
-        # est_volume_xr_hidden = est_volume_xr_hidden[:,1:].sum(dim=1, keepdim=True)
-
         est_volume_ct_random = est_volume_ct_random.sum(dim=1, keepdim=True)
         est_volume_ct_locked = est_volume_ct_locked.sum(dim=1, keepdim=True)
         est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
 
         # Compute the loss
-        # im3d_loss = self.loss(torch.cat([image3d, image3d]), torch.cat([mid_volume_ct_random, est_volume_ct_random])) \
-        #           + self.loss(torch.cat([image3d, image3d]), torch.cat([mid_volume_ct_locked, est_volume_ct_locked])) 
-        # im3d_loss = self.loss(image3d, mid_volume_ct_random) \
-        #           + self.loss(image3d, mid_volume_ct_locked) \
-        #           + self.loss(image3d, est_volume_ct_random) \
-        #           + self.loss(image3d, est_volume_ct_locked) 
         im3d_loss = self.loss(image3d, est_volume_ct_random) \
                   + self.loss(image3d, est_volume_ct_locked) 
     
