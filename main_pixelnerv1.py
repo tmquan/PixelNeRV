@@ -107,19 +107,19 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             sample_size=shape,  
             in_channels=1,  
             out_channels=shape,
-            layers_per_block=3,  # how many ResNet layers to use per UNet block
+            layers_per_block=2,  # how many ResNet layers to use per UNet block
             block_out_channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),  # More channels -> more parameters
             norm_num_groups=16,
             down_block_types=(
                 "DownBlock2D",  
                 "DownBlock2D",  
                 "DownBlock2D",
-                "DownBlock2D",  
+                "AttnDownBlock2D",  
                 "AttnDownBlock2D",
             ),
             up_block_types=(
                 "AttnUpBlock2D",
-                "UpBlock2D",    
+                "AttnUpBlock2D",    
                 "UpBlock2D",
                 "UpBlock2D",
                 "UpBlock2D",    
@@ -139,7 +139,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 # act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.5,
+                dropout=0.5,
             ),
         )
 
@@ -155,7 +155,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 # act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.5,
+                dropout=0.5,
             ),
         )
 
@@ -171,7 +171,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 # act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.5,
+                dropout=0.5,
             ), 
         )
              
