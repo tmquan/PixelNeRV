@@ -54,7 +54,7 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
     def __init__(self, in_channels=1, out_channels=1, backbone="efficientnet-b7"):
         super().__init__()
         assert backbone in backbones.keys()
-        self.img_settings = EfficientNetBN(
+        self.cam_settings = EfficientNetBN(
             model_name=backbone, #(24, 32, 56, 160, 448)
             pretrained=True, 
             spatial_dims=2,
@@ -62,12 +62,12 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
             num_classes=out_channels,
             adv_prop=True,
         )
-        self.img_settings._fc.weight.data.zero_()
-        self.img_settings._fc.bias.data.zero_()
+        self.cam_settings._fc.weight.data.zero_()
+        self.cam_settings._fc.bias.data.zero_()
 
     def forward(self, figures):
-        imgfeat = self.img_settings.forward(figures)
-        return imgfeat
+        camfeat = self.cam_settings.forward(figures)
+        return camfeat
 
 class PixelNeRVFrontToBackInverseRenderer(nn.Module):
     def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0, pe=8, backbone="efficientnet-b7"):
@@ -137,7 +137,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
-                act=("LeakyReLU", {"inplace": True}),
+                # act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
                 dropout=0.5,
             ),
@@ -153,7 +153,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
-                act=("LeakyReLU", {"inplace": True}),
+                # act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
                 dropout=0.5,
             ),
@@ -169,7 +169,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
-                act=("LeakyReLU", {"inplace": True}),
+                # act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
                 dropout=0.5,
             ), 
@@ -200,12 +200,13 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         else:
             volumes = results 
 
-        volumes = torch.cat([clarity, volumes], dim=1)
+        volumes = volumes + clarity.expand(volumes.shape)
+        # volumes = torch.cat([clarity, volumes], dim=1)
         volumes_ct, volumes_xr = torch.split(volumes, 1)
         volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
         volumes = torch.cat([volumes_ct, volumes_xr])
 
-        return volumes
+        return volumes 
 
 
 def init_weights(net, init_type='normal', init_gain=0.02):
