@@ -139,7 +139,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 # act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                dropout=0.5,
+                dropout=0.2,
             ),
         )
 
@@ -155,7 +155,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 # act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                dropout=0.5,
+                dropout=0.2,
             ),
         )
 
@@ -171,7 +171,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 # act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                dropout=0.5,
+                dropout=0.2,
             ), 
         )
              
@@ -200,7 +200,10 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         else:
             volumes = results 
 
-        volumes = volumes + clarity.expand(volumes.shape)
+        volumes += clarity.expand(volumes.shape)
+        volumes += density.expand(volumes.shape)
+        volumes += mixture.expand(volumes.shape)
+        
         # volumes = torch.cat([clarity, volumes], dim=1)
         volumes_ct, volumes_xr = torch.split(volumes, 1)
         volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
