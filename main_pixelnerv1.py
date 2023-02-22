@@ -137,7 +137,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
-                # act=("LeakyReLU", {"inplace": True}),
+                act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
                 dropout=0.2,
             ),
@@ -153,7 +153,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
-                # act=("LeakyReLU", {"inplace": True}),
+                act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
                 dropout=0.2,
             ),
@@ -169,7 +169,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
-                # act=("LeakyReLU", {"inplace": True}),
+                act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
                 dropout=0.2,
             ), 
@@ -204,14 +204,12 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         # volumes += density.expand(volumes.shape)
         # volumes += mixture.expand(volumes.shape)
 
-        # volumes = torch.cat([clarity, volumes], dim=1)
+        volumes = torch.cat([clarity, volumes], dim=1)
         volumes_ct, volumes_xr = torch.split(volumes, 1)
         volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
         volumes = torch.cat([volumes_ct, volumes_xr])
 
-        # return volumes 
-        return torch.cat([clarity, volumes], dim=1) 
-
+        return volumes 
 
 def init_weights(net, init_type='normal', init_gain=0.02):
     """Initialize network weights.
@@ -400,9 +398,9 @@ class PixelNeRVLightningModule(LightningModule):
             )   
            
         # Reconstruct the appropriate XR
-        rec_figure_ct_random = self.forward_screen(image3d=est_volume_ct_random, cameras=camera_random)
-        rec_figure_ct_locked = self.forward_screen(image3d=est_volume_ct_locked, cameras=camera_locked)
-        est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden, cameras=camera_hidden)
+        rec_figure_ct_random = self.forward_screen(image3d=est_volume_ct_random[:,1:], cameras=camera_random)
+        rec_figure_ct_locked = self.forward_screen(image3d=est_volume_ct_locked[:,1:], cameras=camera_locked)
+        est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden[:,1:], cameras=camera_hidden)
         
         # rec_feat_hidden = self.forward_camera(image2d=est_figure_xr_hidden)
         # rec_azim_hidden, rec_elev_hidden = torch.split(rec_feat_hidden, 1, dim=1)
