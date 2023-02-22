@@ -209,7 +209,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
         volumes = torch.cat([volumes_ct, volumes_xr])
 
-        return volumes 
+        # return volumes 
+        return torch.cat([clarity, volumes], dim=1) 
 
 
 def init_weights(net, init_type='normal', init_gain=0.02):
@@ -406,10 +407,22 @@ class PixelNeRVLightningModule(LightningModule):
         # rec_feat_hidden = self.forward_camera(image2d=est_figure_xr_hidden)
         # rec_azim_hidden, rec_elev_hidden = torch.split(rec_feat_hidden, 1, dim=1)
 
-        # Perform Post activation like DVGO
-        est_volume_ct_random = est_volume_ct_random.sum(dim=1, keepdim=True)
-        est_volume_ct_locked = est_volume_ct_locked.sum(dim=1, keepdim=True)
-        est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
+        # # Perform Post activation like DVGO
+        # est_volume_ct_random = est_volume_ct_random.sum(dim=1, keepdim=True)
+        # est_volume_ct_locked = est_volume_ct_locked.sum(dim=1, keepdim=True)
+        # est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
+        
+        mid_volume_ct_random = est_volume_ct_random[:,:1]
+        mid_volume_ct_locked = est_volume_ct_locked[:,:1]
+        mid_volume_xr_hidden = est_volume_xr_hidden[:,:1]
+
+        est_volume_ct_random = est_volume_ct_random[:,1:].sum(dim=1, keepdim=True)
+        est_volume_ct_locked = est_volume_ct_locked[:,1:].sum(dim=1, keepdim=True)
+        est_volume_xr_hidden = est_volume_xr_hidden[:,1:].sum(dim=1, keepdim=True)
+
+        # Compute the loss
+        im3d_loss = self.loss(torch.cat([image3d, image3d]), torch.cat([mid_volume_ct_random, est_volume_ct_random])) \
+                  + self.loss(torch.cat([image3d, image3d]), torch.cat([mid_volume_ct_locked, est_volume_ct_locked])) 
 
         # Compute the loss
         im3d_loss = self.loss(image3d, est_volume_ct_random) \
