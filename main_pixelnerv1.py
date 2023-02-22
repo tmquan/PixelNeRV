@@ -200,10 +200,10 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         else:
             volumes = results 
 
-        volumes += clarity.expand(volumes.shape)
-        volumes += density.expand(volumes.shape)
-        volumes += mixture.expand(volumes.shape)
-        
+        # volumes += clarity.expand(volumes.shape)
+        # volumes += density.expand(volumes.shape)
+        # volumes += mixture.expand(volumes.shape)
+
         # volumes = torch.cat([clarity, volumes], dim=1)
         volumes_ct, volumes_xr = torch.split(volumes, 1)
         volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
