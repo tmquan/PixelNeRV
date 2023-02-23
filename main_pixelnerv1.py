@@ -263,6 +263,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.alpha = hparams.alpha
         self.gamma = hparams.gamma
         self.theta = hparams.theta
+        self.omega = hparams.omega
        
         self.logsdir = hparams.logsdir
        
@@ -447,12 +448,15 @@ class PixelNeRVLightningModule(LightningModule):
                               torch.cat([est_azim_random, est_elev_random])) \
                   + self.loss(torch.cat([src_azim_locked, src_elev_locked]), 
                               torch.cat([est_azim_locked, est_elev_locked])) 
-   
+        view_cond = self.loss(torch.cat([est_azim_hidden, est_elev_hidden]), 
+                              torch.cat([torch.zeros_like(est_azim_hidden), 
+                                         torch.zeros_like(est_elev_hidden)])) 
+                                         
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
 
-        loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
+        loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
         # if optimizer_idx==0:
         #     loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
         # elif optimizer_idx==1:
@@ -540,6 +544,7 @@ if __name__ == "__main__":
     parser.add_argument("--alpha", type=float, default=1., help="vol loss")
     parser.add_argument("--gamma", type=float, default=1., help="img loss")
     parser.add_argument("--theta", type=float, default=1., help="cam loss")
+    parser.add_argument("--omega", type=float, default=1., help="cam cond")
     
     parser.add_argument("--lr", type=float, default=2e-4, help="adam: learning rate")
     parser.add_argument("--ckpt", type=str, default=None, help="path to checkpoint")
