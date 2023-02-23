@@ -333,11 +333,11 @@ class PixelNeRVLightningModule(LightningModule):
         camera_locked = make_cameras(src_dist_locked, src_elev_locked, src_azim_locked)
          
         # Construct the 2 CT projections
-        est_figure_ct_random = self.forward_screen(image3d=image3d, cameras=camera_random)
-        est_figure_ct_locked = self.forward_screen(image3d=image3d, cameras=camera_locked)
+        est_figure_ct_random = self.forward_screen(image3d=image3d, cameras=camera_random).detach()
+        est_figure_ct_locked = self.forward_screen(image3d=image3d, cameras=camera_locked).detach()
            
         # Estimate camera_locked pose for XR
-        src_figure_xr_hidden = image2d
+        src_figure_xr_hidden = image2d.detach()
 
         est_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         est_dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
