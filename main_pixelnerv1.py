@@ -109,7 +109,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             out_channels=shape,
             layers_per_block=2,  # how many ResNet layers to use per UNet block
             block_out_channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),  # More channels -> more parameters
-            norm_num_groups=16,
+            norm_num_groups=8,
             down_block_types=(
                 "DownBlock2D",  
                 "DownBlock2D",  
@@ -331,13 +331,14 @@ class PixelNeRVLightningModule(LightningModule):
         src_elev_locked = torch.randn(self.batch_size, device=_device).clamp_(min=-0.8, max=0.8) # 
         src_dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_locked = make_cameras(src_dist_locked, src_elev_locked, src_azim_locked)
-         
-        # Construct the 2 CT projections
-        est_figure_ct_random = self.forward_screen(image3d=image3d, cameras=camera_random).detach()
-        est_figure_ct_locked = self.forward_screen(image3d=image3d, cameras=camera_locked).detach()
-           
-        # Estimate camera_locked pose for XR
-        src_figure_xr_hidden = image2d.detach()
+        
+        with torch.no_grad():
+            # Construct the 2 CT projections
+            est_figure_ct_random = self.forward_screen(image3d=image3d, cameras=camera_random)
+            est_figure_ct_locked = self.forward_screen(image3d=image3d, cameras=camera_locked)
+            
+            # Estimate camera_locked pose for XR
+            src_figure_xr_hidden = image2d
 
         est_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         est_dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
