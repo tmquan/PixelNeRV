@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+torch.set_float32_matmul_precision('medium')
 torch.cuda.empty_cache()
 torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -23,6 +24,7 @@ from diffusers import UNet2DModel
 from lightning_fabric.utilities.seed import seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import StochasticWeightAveraging
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer, LightningModule
 from argparse import ArgumentParser
@@ -35,13 +37,45 @@ from positional_encodings.torch_encodings import PositionalEncodingPermute3D
 from datamodule import UnpairedDataModule
 from dvr.renderer import DirectVolumeFrontToBackRenderer, minimized, normalized, standardized
 
+backbones = {
+    "efficientnet-b0": (16, 24, 40, 112, 320),
+    "efficientnet-b1": (16, 24, 40, 112, 320),
+    "efficientnet-b2": (16, 24, 48, 120, 352),
+    "efficientnet-b3": (24, 32, 48, 136, 384),
+    "efficientnet-b4": (24, 32, 56, 160, 448),
+    "efficientnet-b5": (24, 40, 64, 176, 512),
+    "efficientnet-b6": (32, 40, 72, 200, 576),
+    "efficientnet-b7": (32, 48, 80, 224, 640),
+    "efficientnet-b8": (32, 56, 88, 248, 704),
+    "efficientnet-l2": (72, 104, 176, 480, 1376),
+}
+
+class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
+    def __init__(self, in_channels=1, out_channels=1, backbone="efficientnet-b7"):
+        super().__init__()
+        assert backbone in backbones.keys()
+        self.model = EfficientNetBN(
+            model_name=backbone, #(24, 32, 56, 160, 448)
+            pretrained=True, 
+            spatial_dims=2,
+            in_channels=in_channels,
+            num_classes=out_channels,
+            adv_prop=True,
+        )
+        self.model._fc.weight.data.zero_()
+        self.model._fc.bias.data.zero_()
+
+    def forward(self, figures):
+        camfeat = self.model.forward(figures)
+        return camfeat
+
 class PixelNeRVFrontToBackInverseRenderer(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0, pe=8):
+    def __init__(self, in_channels=3, out_channels=1, shape=256, sh=0, pe=8, backbone="efficientnet-b7"):
         super().__init__()
         self.sh = sh
         self.pe = pe
         self.shape = shape
-
+        assert backbone in backbones.keys()
         if self.pe>0:
             encoder_net = PositionalEncodingPermute3D(self.pe) # 8
             pe_channels = self.pe
@@ -67,48 +101,45 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 assert out_channels == 16
             else:
                 ValueError("Spherical Harmonics only support 2 and 3 degree")
-            # torch.Size([100, 100, 100, 9 or 16])
             self.register_buffer('shbasis', shw.unsqueeze(0).permute(0, 4, 1, 2, 3))
-            
-        self.clarity_net = nn.Sequential(
-            Unet(
-                spatial_dims=2,
-                in_channels=in_channels,
-                out_channels=shape,
-                channels=(32, 48, 80, 224, 640, 800),
-                strides=(2, 2, 2, 2, 2),
-                num_res_units=4,
-                kernel_size=3,
-                up_kernel_size=3,
-                act=("LeakyReLU", {"inplace": True}),
-                norm=Norm.BATCH,
-                # dropout=0.4,
+     
+        self.clarity_net = UNet2DModel(
+            sample_size=shape,  
+            in_channels=1,  
+            out_channels=shape,
+            layers_per_block=2,  # how many ResNet layers to use per UNet block
+            block_out_channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),  # More channels -> more parameters
+            norm_num_groups=8,
+            down_block_types=(
+                "DownBlock2D",  
+                "DownBlock2D",  
+                "DownBlock2D",
+                "AttnDownBlock2D",  
+                "AttnDownBlock2D",
             ),
-            Reshape(*[1, shape, shape, shape]),
+            up_block_types=(
+                "AttnUpBlock2D",
+                "AttnUpBlock2D",    
+                "UpBlock2D",
+                "UpBlock2D",
+                "UpBlock2D",    
+            ),
+            class_embed_type="timestep",
         )
-
-        self.cam_settings = EfficientNetBN(
-            model_name="efficientnet-b7", #(32, 48, 80, 224, 640)
-            pretrained=True, 
-            spatial_dims=3,
-            in_channels=in_channels,
-            num_classes=1,
-        )
-
 
         self.density_net = nn.Sequential(
             Unet(
                 spatial_dims=3,
                 in_channels=1+pe_channels,
                 out_channels=1,
-                channels=(32, 48, 80, 224, 640, 800),
+                channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.4,
+                dropout=0.2,
             ),
         )
 
@@ -117,14 +148,14 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=2+pe_channels,
                 out_channels=1,
-                channels=(32, 48, 80, 224, 640, 800),
+                channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.4,
+                dropout=0.2,
             ),
         )
 
@@ -133,24 +164,27 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 spatial_dims=3,
                 in_channels=3+pe_channels,
                 out_channels=out_channels,
-                channels=(32, 48, 80, 224, 640, 800),
+                channels=(32, 48, 80, 224, 640), #(32, 48, 80, 224, 640),
                 strides=(2, 2, 2, 2, 2),
                 num_res_units=2,
                 kernel_size=3,
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.4,
+                dropout=0.2,
             ), 
         )
              
-    def forward(self, figures):
-        clarity = self.clarity_net(figures).view(-1, 1 , self.shape, self.shape, self.shape)
-        azimuth = self.cam_settings(clarity)
+    def forward(self, figures, azim, elev, n_views=2):
+        samples = figures.shape[0] # 3
+        clarity = self.clarity_net(figures, azim*1000, elev*2000)[0].view(-1, 1, self.shape, self.shape, self.shape)
+        
+        # Multiview can stack along batch dimension, last dimension is for X-ray
+        clarity_ct, clarity_xr = torch.split(clarity, n_views)
+        clarity_ct = clarity_ct.mean(dim=0, keepdim=True)
+        clarity = torch.cat([clarity_ct, clarity_xr])
+
         if self.pe > 0:
-            # pos_enc = torch.ones((clarity.shape[0], self.pe, self.shape, self.shape, self.shape), device=clarity.device)
-            # encoded = self.encoder_net(pos_enc)
-            # print(self.encoded.shape)
             density = self.density_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity], dim=1))
             mixture = self.mixture_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity, density], dim=1))
             results = self.refiner_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity, density, mixture], dim=1))
@@ -158,14 +192,18 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             density = self.density_net(torch.cat([clarity], dim=1))
             mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
             results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
-        
+
         if self.sh > 0:
-            volumes = results*self.shbasis.repeat(figures.shape[0], 1, 1, 1, 1) 
+            volumes = results*self.shbasis.repeat(clarity.shape[0], 1, 1, 1, 1) 
         else:
             volumes = results 
 
-        return volumes, azimuth
+        volumes = torch.cat([clarity, volumes], dim=1)
+        volumes_ct, volumes_xr = torch.split(volumes, 1)
+        volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
+        volumes = torch.cat([volumes_ct, volumes_xr])
 
+        return volumes 
 
 def init_weights(net, init_type='normal', init_gain=0.02):
     """Initialize network weights.
@@ -196,6 +234,7 @@ def init_weights(net, init_type='normal', init_gain=0.02):
             nn.init.constant_(m.bias.data, 0.0)
     # print('initialize network with %s' % init_type)
     net.apply(init_func)  # apply the initialization function <init_func>
+
 def mean_and_tanh(x, eps=1e-8): return ( F.tanh(x.mean(dim=1, keepdim=True)) * 0.5 + 0.5 )  
 def mean_and_relu(x, eps=1e-8): return ( F.relu(x.mean(dim=1, keepdim=True)) )  
 
@@ -212,23 +251,26 @@ def make_cameras(dist, elev, azim):
 class PixelNeRVLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
         super().__init__()
-        self.logsdir = hparams.logsdir
         self.lr = hparams.lr
         self.cam = hparams.cam
-        self.rng = hparams.rng
         self.shape = hparams.shape
         self.alpha = hparams.alpha
         self.gamma = hparams.gamma
         self.theta = hparams.theta
+        self.omega = hparams.omega
+       
+        self.logsdir = hparams.logsdir
+       
         self.st = hparams.st
         self.sh = hparams.sh
         self.pe = hparams.pe
+        
+        self.n_pts_per_ray = hparams.n_pts_per_ray
         self.weight_decay = hparams.weight_decay
         self.batch_size = hparams.batch_size
+        self.backbone = hparams.backbone
         self.devices = hparams.devices
-
-        self.n_pts_per_ray = hparams.n_pts_per_ray
-
+        
         self.save_hyperparameters()
     
         self.fwd_renderer = DirectVolumeFrontToBackRenderer(
@@ -240,20 +282,32 @@ class PixelNeRVLightningModule(LightningModule):
         )
         
         self.inv_renderer = PixelNeRVFrontToBackInverseRenderer(
-            in_channels=1, 
+            in_channels=2, 
             out_channels=9 if self.sh==2 else 16 if self.sh==3 else 1, 
             shape=self.shape, 
             sh=self.sh, 
             pe=self.pe,
+            backbone=self.backbone,
         )
+
+        self.cam_settings = PixelNeRVFrontToBackFrustumFeaturer(
+            in_channels=1, 
+            out_channels=2,
+            backbone=self.backbone,
+        )
+
         # init_weights(self.inv_renderer, init_type="normal")
-        self.loss_smoothl1 = nn.SmoothL1Loss(reduction="mean", beta=0.02)
+        # init_weights(self.cam_settings, init_type="normal")
+        self.loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras):      
         return self.fwd_renderer(image3d, cameras) 
 
-    def forward(self, image2d):      
-        return self.inv_renderer(image2d * 2.0 - 1.0) 
+    def forward_volume(self, image2d, azim, elev, n_views=2):      
+        return self.inv_renderer(image2d * 2.0 - 1.0, azim.squeeze(), elev.squeeze(), n_views) 
+
+    def forward_camera(self, image2d):
+        return self.cam_settings(image2d * 2.0 - 1.0)
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -261,104 +315,163 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
             
         # Construct the random cameras
-        src_azim_random = torch.randn(self.batch_size, device=_device) # 
-        src_elev_random = torch.zeros(self.batch_size, device=_device) # 
+        src_azim_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.8, max=0.8) # 
+        src_elev_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.8, max=0.8) # 
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_random = make_cameras(src_dist_random, src_elev_random, src_azim_random)
         
-        src_azim_locked = torch.zeros(self.batch_size, device=_device) # 
-        src_elev_locked = torch.zeros(self.batch_size, device=_device) # 
+        # src_azim_locked = torch.zeros(self.batch_size, device=_device) # 
+        # src_elev_locked = torch.zeros(self.batch_size, device=_device) # 
+        src_azim_locked = torch.randn(self.batch_size, device=_device).clamp_(min=-0.8, max=0.8) # 
+        src_elev_locked = torch.randn(self.batch_size, device=_device).clamp_(min=-0.8, max=0.8) # 
         src_dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_locked = make_cameras(src_dist_locked, src_elev_locked, src_azim_locked)
-         
-        # Construct the 2 CT projections
-        est_figure_ct_random = self.forward_screen(image3d=image3d, cameras=camera_random)
-        est_figure_ct_locked = self.forward_screen(image3d=image3d, cameras=camera_locked)
-           
-        # Estimate camera_locked pose for XR
-        src_figure_xr_hidden = image2d
         
-        # Jointly estimate the volumes
-        # est_volume_ct_random, est_azim_random = self.forward(image2d=est_figure_ct_random)
-        # est_volume_ct_locked, est_azim_locked = self.forward(image2d=est_figure_ct_locked)
-        # est_volume_xr_hidden, est_azim_hidden = self.forward(image2d=src_figure_xr_hidden)
-        est_image3d, est_azimuth = \
-            self.forward(
-                image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
-            )
-        # est_volume_ct_random, est_azim_random = volume_azim_random
-        # est_volume_ct_locked, est_azim_locked = volume_azim_locked
-        # est_volume_xr_hidden, est_azim_hidden = volume_azim_hidden
-        est_volume_ct_random, \
-        est_volume_ct_locked, \
-        est_volume_xr_hidden = torch.split(est_image3d, self.batch_size, 0)
-        # print(est_image3d.shape)
-        # print(est_azimuth.shape)
-        est_azim_random, \
-        est_azim_locked, \
-        est_azim_hidden = torch.split(est_azimuth, self.batch_size, 0)
-        
-        est_azim_random = est_azim_random.squeeze(1)
-        est_azim_locked = est_azim_locked.squeeze(1)
-        est_azim_hidden = est_azim_hidden.squeeze(1)
-        
-        est_elev_hidden = torch.zeros(self.batch_size, device=_device) # 
+        with torch.no_grad():
+            # Construct the 2 CT projections
+            est_figure_ct_random = self.forward_screen(image3d=image3d, cameras=camera_random)
+            est_figure_ct_locked = self.forward_screen(image3d=image3d, cameras=camera_locked)
+            
+            # Estimate camera_locked pose for XR
+            src_figure_xr_hidden = image2d
+
+        est_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
+        est_dist_locked = 4.0 * torch.ones(self.batch_size, device=_device)
         est_dist_hidden = 4.0 * torch.ones(self.batch_size, device=_device)
+        
+        # Reconstruct the cameras
+        est_feat_random, \
+        est_feat_locked, \
+        est_feat_hidden = torch.split(
+            self.forward_camera(
+                image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden])
+            ), self.batch_size
+        )
+
+        est_azim_random, est_elev_random = torch.split(est_feat_random, 1, dim=1)
+        est_azim_locked, est_elev_locked = torch.split(est_feat_locked, 1, dim=1)
+        est_azim_hidden, est_elev_hidden = torch.split(est_feat_hidden, 1, dim=1)
+
+        camera_random = make_cameras(est_dist_random, est_elev_random, est_azim_random)
+        camera_locked = make_cameras(est_dist_locked, est_elev_locked, est_azim_locked)
         camera_hidden = make_cameras(est_dist_hidden, est_elev_hidden, est_azim_hidden)
 
+        cam_view = [self.batch_size, 1]       
+        # Jointly estimate the volumes, single view, random view and multiple views
+        rng_figure = torch.randint(low=0, high=3, size=(1, 1))
+        if stage=='train' and rng_figure==1:
+            est_volume_ct_random, \
+            est_volume_xr_hidden = torch.split(
+                self.forward_volume(
+                    image2d=torch.cat([est_figure_ct_random, src_figure_xr_hidden]),
+                    azim=torch.cat([est_azim_random.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([est_elev_random.view(cam_view), est_elev_hidden.view(cam_view)]),
+                    n_views=1
+                ), self.batch_size
+            )
+            est_volume_ct_locked = est_volume_ct_random
+        elif stage=='train' and rng_figure==2:
+            est_volume_ct_locked, \
+            est_volume_xr_hidden = torch.split(
+                self.forward_volume(
+                    image2d=torch.cat([est_figure_ct_locked, src_figure_xr_hidden]),
+                    azim=torch.cat([est_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([est_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
+                    n_views=1
+                ), self.batch_size
+            )
+            est_volume_ct_random = est_volume_ct_locked
+        else:
+            est_volume_ct_random, \
+            est_volume_ct_locked, \
+            est_volume_xr_hidden = torch.split(
+                self.forward_volume(
+                    image2d=torch.cat([est_figure_ct_random, est_figure_ct_locked, src_figure_xr_hidden]),
+                    azim=torch.cat([est_azim_random.view(cam_view), est_azim_locked.view(cam_view), est_azim_hidden.view(cam_view)]),
+                    elev=torch.cat([est_elev_random.view(cam_view), est_elev_locked.view(cam_view), est_elev_hidden.view(cam_view)]),
+                    n_views=2,
+                ), self.batch_size
+            )    
+           
         # Reconstruct the appropriate XR
-        rec_figure_ct_random_random = self.forward_screen(image3d=est_volume_ct_random, cameras=camera_random)
-        rec_figure_ct_random_locked = self.forward_screen(image3d=est_volume_ct_random, cameras=camera_locked)
-        rec_figure_ct_locked_random = self.forward_screen(image3d=est_volume_ct_locked, cameras=camera_random)
-        rec_figure_ct_locked_locked = self.forward_screen(image3d=est_volume_ct_locked, cameras=camera_locked)
-        rec_figure_xr_hidden_hidden = self.forward_screen(image3d=est_volume_xr_hidden, cameras=camera_hidden)
+        rec_figure_ct_random = self.forward_screen(image3d=est_volume_ct_random[:,1:], cameras=camera_random)
+        rec_figure_ct_locked = self.forward_screen(image3d=est_volume_ct_locked[:,1:], cameras=camera_locked)
+        est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden[:,1:], cameras=camera_hidden)
         
-        # Perform Post activation like DVGO
-        est_volume_ct_random = est_volume_ct_random.sum(dim=1, keepdim=True)
-        est_volume_ct_locked = est_volume_ct_locked.sum(dim=1, keepdim=True)
-        est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
+        # rec_feat_hidden = self.forward_camera(image2d=est_figure_xr_hidden)
+        # rec_azim_hidden, rec_elev_hidden = torch.split(rec_feat_hidden, 1, dim=1)
+
+        # # Perform Post activation like DVGO
+        # est_volume_ct_random = est_volume_ct_random.sum(dim=1, keepdim=True)
+        # est_volume_ct_locked = est_volume_ct_locked.sum(dim=1, keepdim=True)
+        # est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
+        
+        mid_volume_ct_random = est_volume_ct_random[:,:1]
+        mid_volume_ct_locked = est_volume_ct_locked[:,:1]
+        mid_volume_xr_hidden = est_volume_xr_hidden[:,:1]
+
+        est_volume_ct_random = est_volume_ct_random[:,1:].sum(dim=1, keepdim=True)
+        est_volume_ct_locked = est_volume_ct_locked[:,1:].sum(dim=1, keepdim=True)
+        est_volume_xr_hidden = est_volume_xr_hidden[:,1:].sum(dim=1, keepdim=True)
 
         # Compute the loss
-        im3d_loss = self.loss_smoothl1(image3d, est_volume_ct_random) \
-                  + self.loss_smoothl1(image3d, est_volume_ct_locked) 
+        im3d_loss_ct_random = self.loss(image3d, est_volume_ct_random) + self.loss(image3d, mid_volume_ct_random) 
+        im3d_loss_ct_locked = self.loss(image3d, est_volume_ct_locked) + self.loss(image3d, mid_volume_ct_locked) 
+    
+        im2d_loss_ct_random = self.loss(est_figure_ct_random, rec_figure_ct_random) 
+        im2d_loss_ct_locked = self.loss(est_figure_ct_locked, rec_figure_ct_locked) 
+        im2d_loss_xr_hidden = self.loss(src_figure_xr_hidden, est_figure_xr_hidden) 
 
-        im2d_loss = self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_random_locked) \
-                  + self.loss_smoothl1(est_figure_ct_locked, rec_figure_ct_locked_locked) \
-                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_random_random) \
-                  + self.loss_smoothl1(est_figure_ct_random, rec_figure_ct_locked_random) \
-                  + self.loss_smoothl1(src_figure_xr_hidden, rec_figure_xr_hidden_hidden) 
+        view_loss_ct_random = self.loss(torch.cat([src_azim_random, src_elev_random]), 
+                                        torch.cat([est_azim_random, est_elev_random])) 
+        view_loss_ct_locked = self.loss(torch.cat([src_azim_locked, src_elev_locked]), 
+                                        torch.cat([est_azim_locked, est_elev_locked])) 
+        view_loss_xr_hidden = self.loss(torch.cat([est_azim_hidden, est_elev_hidden]), 
+                                        torch.cat([torch.zeros_like(est_azim_hidden), torch.zeros_like(est_elev_hidden)])) 
 
-        view_loss = self.loss_smoothl1(src_azim_random, est_azim_random) \
-                  + self.loss_smoothl1(src_azim_locked, est_azim_locked) 
-   
-        self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-        self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-        self.log(f'{stage}_view_loss', view_loss, on_step=(stage == 'train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        im2d_loss_ct = im2d_loss_ct_random + im2d_loss_ct_locked 
+        im2d_loss_xr = im2d_loss_xr_hidden
+        im3d_loss_ct = im3d_loss_ct_random + im3d_loss_ct_locked
+        view_loss_ct = view_loss_ct_random + view_loss_ct_locked
+        view_cond_xr = view_loss_xr_hidden
 
-        loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
+        im2d_loss = im2d_loss_ct + im2d_loss_xr
+        im3d_loss = im3d_loss_ct
+        view_loss = view_loss_ct
+        view_cond = view_cond_xr
+
+        self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        self.log(f'{stage}_view_loss', view_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+
+        # loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
         # if optimizer_idx==0:
         #     loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
         # elif optimizer_idx==1:
         #     loss = self.theta*view_loss + self.gamma*im2d_loss
         # else:
         #     loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
+        
+        if optimizer_idx==0:
+            loss = self.alpha*im3d_loss_ct + self.gamma*im2d_loss_ct 
+        elif optimizer_idx==1:
+            loss = self.theta*view_loss_ct + self.gamma*im2d_loss_ct + self.gamma*im2d_loss_xr + self.omega*view_cond_xr
+        else:
+            loss = self.alpha*im3d_loss_ct + self.theta*view_loss_ct + self.gamma*im2d_loss_ct + self.gamma*im2d_loss_xr + self.omega*view_cond_xr
 
-        if batch_idx == 0:
+        if batch_idx==0:
             viz2d = torch.cat([
                         torch.cat([image3d[..., self.shape//2, :], 
                                    est_figure_ct_locked,
                                    est_figure_ct_random,
-                                   est_volume_ct_locked[..., self.shape//2, :],
                                    ], dim=-2).transpose(2, 3),
-                        torch.cat([rec_figure_ct_locked_locked,
-                                   rec_figure_ct_locked_random,
-                                   rec_figure_ct_random_locked,
-                                   rec_figure_ct_random_random,
+                        torch.cat([est_volume_ct_locked[..., self.shape//2, :],
+                                   rec_figure_ct_locked,
+                                   rec_figure_ct_random,
                                    ], dim=-2).transpose(2, 3),
                         torch.cat([image2d, 
-                                   src_figure_xr_hidden,
                                    est_volume_xr_hidden[..., self.shape//2, :],
-                                   rec_figure_xr_hidden_hidden,
+                                   est_figure_xr_hidden,
                                    ], dim=-2).transpose(2, 3),
                     ], dim=-2)
             grid = torchvision.utils.make_grid(viz2d, normalize=False, scale_each=False, nrow=1, padding=0)
@@ -368,16 +481,16 @@ class PixelNeRVLightningModule(LightningModule):
         info = {f'loss': loss}
         return info
 
-    def training_step(self, batch, batch_idx):
-        return self._common_step(batch, batch_idx, optimizer_idx=0, stage='train')
-    # def training_step(self, batch, batch_idx, optimizer_idx):
-    #     return self._common_step(batch, batch_idx, optimizer_idx, stage='train')
+    # def training_step(self, batch, batch_idx):
+    #     return self._common_step(batch, batch_idx, optimizer_idx=0, stage='train')
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        return self._common_step(batch, batch_idx, optimizer_idx, stage='train')
 
     def validation_step(self, batch, batch_idx):
-        return self._common_step(batch, batch_idx, optimizer_idx=0, stage='validation')
+        return self._common_step(batch, batch_idx, optimizer_idx=-1, stage='validation')
 
     def test_step(self, batch, batch_idx):
-        return self._common_step(batch, batch_idx, optimizer_idx=0, stage='test')
+        return self._common_step(batch, batch_idx, optimizer_idx=-1, stage='test')
 
     def _common_epoch_end(self, outputs, stage: Optional[str] = 'common'):
         loss = torch.stack([x[f'loss'] for x in outputs]).mean()
@@ -393,14 +506,14 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
-        return [optimizer], [scheduler]
-        # opt_inv = torch.optim.AdamW(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        # opt_cam = torch.optim.AdamW(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        # sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
-        # sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
-        # return [opt_inv, opt_cam], [sch_inv, sch_cam]
+        # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
+        # return [optimizer], [scheduler]
+        opt_inv = torch.optim.AdamW(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        opt_cam = torch.optim.AdamW(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
+        sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
+        return [opt_inv, opt_cam], [sch_inv, sch_cam]
 
 
 if __name__ == "__main__":
@@ -421,19 +534,20 @@ if __name__ == "__main__":
     parser.add_argument("--pe", type=int, default=0, help="positional encoding (0 - 8)")
     
     parser.add_argument("--cam", action="store_true", help="train cam locked or hidden")
-    parser.add_argument("--rng", action="store_true", help="train with random volume")
     parser.add_argument("--amp", action="store_true", help="train with mixed precision or not")
     
     parser.add_argument("--alpha", type=float, default=1., help="vol loss")
     parser.add_argument("--gamma", type=float, default=1., help="img loss")
     parser.add_argument("--theta", type=float, default=1., help="cam loss")
-    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
+    parser.add_argument("--omega", type=float, default=1., help="cam cond")
+    
     parser.add_argument("--lr", type=float, default=2e-4, help="adam: learning rate")
     parser.add_argument("--ckpt", type=str, default=None, help="path to checkpoint")
     parser.add_argument("--logsdir", type=str, default='logsfrecaling', help="logging directory")
     parser.add_argument("--datadir", type=str, default='data', help="data directory")
-    parser.add_argument("--filter", type=str, default='sobel', help="None, sobel, laplacian, canny")
-
+    parser.add_argument("--backbone", type=str, default='efficientnet-b7', help="Backbone for network")
+    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
+    
     parser = Trainer.add_argparse_args(parser)
 
     # Collect the hyper parameters
@@ -456,7 +570,7 @@ if __name__ == "__main__":
 
     # Logger
     tensorboard_logger = TensorBoardLogger(save_dir=hparams.logsdir, log_graph=True)
-
+    swa_callback = StochasticWeightAveraging(swa_lrs=1e-2)
     # Init model with callbacks
     trainer = Trainer.from_argparse_args(
         hparams,
@@ -465,10 +579,12 @@ if __name__ == "__main__":
         callbacks=[
             lr_callback,
             checkpoint_callback,
+            # swa_callback
         ],
-        # accumulate_grad_batches=4,
+        accumulate_grad_batches=4,
         # strategy="ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         strategy="ddp_sharded",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
+        # plugins=DDPStrategy(find_unused_parameters=False),
         precision=16 if hparams.amp else 32,
         # stochastic_weight_avg=True,
         # deterministic=False,
