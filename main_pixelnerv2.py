@@ -398,10 +398,10 @@ class PixelNeRVLightningModule(LightningModule):
         rec_figure_ct_locked = self.forward_screen(image3d=est_volume_ct_locked[:,1:], cameras=camera_locked)
         est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden[:,1:], cameras=camera_hidden)
         
-        if optimizer_idx==1:
-            rec_figure_ct_random = rec_figure_ct_random.detach()
-            rec_figure_ct_locked = rec_figure_ct_locked.detach()
-            est_figure_xr_hidden = est_figure_xr_hidden.detach()
+        # if optimizer_idx==1:
+        #     rec_figure_ct_random = rec_figure_ct_random.detach()
+        #     rec_figure_ct_locked = rec_figure_ct_locked.detach()
+        #     est_figure_xr_hidden = est_figure_xr_hidden.detach()
 
         rec_feat_random, \
         rec_feat_locked, \
@@ -474,7 +474,7 @@ class PixelNeRVLightningModule(LightningModule):
             loss = self.alpha*im3d_loss + self.gamma*im2d_loss_ct 
             loss += g_loss
         elif optimizer_idx==1:
-            loss = self.theta*view_loss + self.gamma*im2d_loss_ct + self.gamma*im2d_loss_xr + self.omega*view_cond_xr
+            loss = self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond_xr
             loss += d_loss
         else:
             loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond_xr
