@@ -292,7 +292,7 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.cam_settings = PixelNeRVFrontToBackFrustumFeaturer(
             in_channels=1, 
-            out_channels=2,
+            out_channels=3, # azim + elev + prob
             backbone=self.backbone,
         )
 
@@ -348,9 +348,9 @@ class PixelNeRVLightningModule(LightningModule):
             ), self.batch_size
         )
 
-        est_azim_random, est_elev_random = torch.split(est_feat_random, 1, dim=1)
-        est_azim_locked, est_elev_locked = torch.split(est_feat_locked, 1, dim=1)
-        est_azim_hidden, est_elev_hidden = torch.split(est_feat_hidden, 1, dim=1)
+        est_azim_random, est_elev_random, est_prob_random = torch.split(est_feat_random, 1, dim=1)
+        est_azim_locked, est_elev_locked, est_prob_locked = torch.split(est_feat_locked, 1, dim=1)
+        est_azim_hidden, est_elev_hidden, est_prob_hidden = torch.split(est_feat_hidden, 1, dim=1)
 
         camera_random = make_cameras(est_dist_random, est_elev_random, est_azim_random)
         camera_locked = make_cameras(est_dist_locked, est_elev_locked, est_azim_locked)
@@ -394,18 +394,25 @@ class PixelNeRVLightningModule(LightningModule):
             )    
            
         # Reconstruct the appropriate XR
-        rec_figure_ct_random = self.forward_screen(image3d=est_volume_ct_random[:,1:], cameras=camera_random)
-        rec_figure_ct_locked = self.forward_screen(image3d=est_volume_ct_locked[:,1:], cameras=camera_locked)
-        est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden[:,1:], cameras=camera_hidden)
+        rec_figure_ct_random = self.forward_screen(image3d=est_volume_ct_random[:,1:], cameras=camera_random).detach()
+        rec_figure_ct_locked = self.forward_screen(image3d=est_volume_ct_locked[:,1:], cameras=camera_locked).detach()
+        est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden[:,1:], cameras=camera_hidden).detach()
         
-        # rec_feat_hidden = self.forward_camera(image2d=est_figure_xr_hidden)
-        # rec_azim_hidden, rec_elev_hidden = torch.split(rec_feat_hidden, 1, dim=1)
+        rec_feat_random, \
+        rec_feat_locked, \
+        rec_feat_hidden = torch.split(
+            self.forward_camera(
+                image2d=torch.cat([rec_figure_ct_random, rec_figure_ct_locked, est_figure_xr_hidden])
+            ), self.batch_size
+        )
 
-        # # Perform Post activation like DVGO
-        # est_volume_ct_random = est_volume_ct_random.sum(dim=1, keepdim=True)
-        # est_volume_ct_locked = est_volume_ct_locked.sum(dim=1, keepdim=True)
-        # est_volume_xr_hidden = est_volume_xr_hidden.sum(dim=1, keepdim=True)
-        
+        rec_azim_random, rec_elev_random, rec_prob_random = torch.split(rec_feat_random, 1, dim=1)
+        rec_azim_locked, rec_elev_locked, rec_prob_locked = torch.split(rec_feat_locked, 1, dim=1)
+        rec_azim_hidden, rec_elev_hidden, rec_prob_hidden = torch.split(rec_feat_hidden, 1, dim=1)
+
+
+
+        # Perform Post activation like DVGO      
         mid_volume_ct_random = est_volume_ct_random[:,:1]
         mid_volume_ct_locked = est_volume_ct_locked[:,:1]
         mid_volume_xr_hidden = est_volume_xr_hidden[:,:1]
@@ -415,6 +422,10 @@ class PixelNeRVLightningModule(LightningModule):
         est_volume_xr_hidden = est_volume_xr_hidden[:,1:].sum(dim=1, keepdim=True)
 
         # Compute the loss
+        g_loss = -torch.mean(rec_prob_random) - torch.mean(rec_prob_locked) - torch.mean(rec_prob_hidden)
+        d_loss = -torch.mean(est_prob_random) - torch.mean(est_prob_locked) - torch.mean(est_prob_hidden) \
+                 +torch.mean(rec_prob_random) + torch.mean(rec_prob_locked) + torch.mean(rec_prob_hidden)
+        # Per-pixel_loss
         im3d_loss_ct_random = self.loss(image3d, est_volume_ct_random) + self.loss(image3d, mid_volume_ct_random) 
         im3d_loss_ct_locked = self.loss(image3d, est_volume_ct_locked) + self.loss(image3d, mid_volume_ct_locked) 
     
@@ -443,6 +454,8 @@ class PixelNeRVLightningModule(LightningModule):
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
+        self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
 
         # loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
         # if optimizer_idx==0:
@@ -454,8 +467,10 @@ class PixelNeRVLightningModule(LightningModule):
         
         if optimizer_idx==0:
             loss = self.alpha*im3d_loss_ct + self.gamma*im2d_loss_ct 
+            loss += g_loss
         elif optimizer_idx==1:
             loss = self.theta*view_loss_ct + self.gamma*im2d_loss_ct + self.gamma*im2d_loss_xr + self.omega*view_cond_xr
+            loss += d_loss
         else:
             loss = self.alpha*im3d_loss_ct + self.theta*view_loss_ct + self.gamma*im2d_loss_ct + self.gamma*im2d_loss_xr + self.omega*view_cond_xr
 
