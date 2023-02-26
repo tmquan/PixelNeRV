@@ -419,9 +419,9 @@ class PixelNeRVLightningModule(LightningModule):
         # rec_azim_locked, rec_elev_locked, rec_prob_locked = torch.split(rec_feat_locked, 1, dim=1)
         # rec_azim_hidden, rec_elev_hidden, rec_prob_hidden = torch.split(rec_feat_hidden, 1, dim=1)
 
-        rec_azim_random, rec_elev_random = torch.split(rec_feat_random, 1, dim=1)
-        rec_azim_locked, rec_elev_locked = torch.split(rec_feat_locked, 1, dim=1)
-        rec_azim_hidden, rec_elev_hidden = torch.split(rec_feat_hidden, 1, dim=1)
+        # rec_azim_random, rec_elev_random = torch.split(rec_feat_random, 1, dim=1)
+        # rec_azim_locked, rec_elev_locked = torch.split(rec_feat_locked, 1, dim=1)
+        # rec_azim_hidden, rec_elev_hidden = torch.split(rec_feat_hidden, 1, dim=1)
 
 
         # Perform Post activation like DVGO      
@@ -445,24 +445,28 @@ class PixelNeRVLightningModule(LightningModule):
         im2d_loss_ct_locked = self.loss(est_figure_ct_locked, rec_figure_ct_locked) 
         im2d_loss_xr_hidden = self.loss(src_figure_xr_hidden, est_figure_xr_hidden) 
 
-        view_loss_ct_random = self.loss(torch.cat([src_azim_random, src_elev_random, src_azim_random, src_elev_random]), 
-                                        torch.cat([est_azim_random, est_elev_random, rec_azim_random, rec_elev_random])) 
-        view_loss_ct_locked = self.loss(torch.cat([src_azim_locked, src_elev_locked, src_azim_locked, src_elev_locked]), 
-                                        torch.cat([est_azim_locked, est_elev_locked, rec_azim_locked, rec_elev_locked])) 
-        view_loss_xr_hidden = self.loss(torch.cat([est_azim_hidden, est_elev_hidden]), 
-                                        torch.cat([rec_azim_hidden, rec_elev_hidden])) 
-                                        # torch.cat([torch.zeros_like(est_azim_hidden), torch.zeros_like(est_elev_hidden)])) 
+        # view_loss_ct_random = self.loss(torch.cat([src_azim_random, src_elev_random, src_azim_random, src_elev_random]), 
+        #                                 torch.cat([est_azim_random, est_elev_random, rec_azim_random, rec_elev_random])) 
+        # view_loss_ct_locked = self.loss(torch.cat([src_azim_locked, src_elev_locked, src_azim_locked, src_elev_locked]), 
+        #                                 torch.cat([est_azim_locked, est_elev_locked, rec_azim_locked, rec_elev_locked])) 
+        # view_loss_xr_hidden = self.loss(torch.cat([est_azim_hidden, est_elev_hidden]), 
+        #                                 torch.cat([rec_azim_hidden, rec_elev_hidden])) 
+        view_loss_ct_random = self.loss(torch.cat([src_azim_random, src_elev_random]), 
+                                        torch.cat([est_azim_random, est_elev_random])) 
+        view_loss_ct_locked = self.loss(torch.cat([src_azim_locked, src_elev_locked]), 
+                                        torch.cat([est_azim_locked, est_elev_locked])) 
 
         im2d_loss_ct = im2d_loss_ct_random + im2d_loss_ct_locked 
         im2d_loss_xr = im2d_loss_xr_hidden
         im3d_loss_ct = im3d_loss_ct_random + im3d_loss_ct_locked
         view_loss_ct = view_loss_ct_random + view_loss_ct_locked
-        view_loss_xr = view_loss_xr_hidden
+        # view_loss_xr = view_loss_xr_hidden
         view_cond_xr = self.loss(torch.cat([est_azim_hidden, est_elev_hidden]), 
                                  torch.cat([torch.zeros_like(est_azim_hidden), torch.zeros_like(est_elev_hidden)])) 
         im2d_loss = im2d_loss_ct + im2d_loss_xr
         im3d_loss = im3d_loss_ct
-        view_loss = view_loss_ct + view_loss_xr
+        # view_loss = view_loss_ct + view_loss_xr
+        view_loss = view_loss_ct 
         view_cond = view_cond_xr
 
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
@@ -470,14 +474,6 @@ class PixelNeRVLightningModule(LightningModule):
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         # self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
         # self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
-
-        # loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
-        # if optimizer_idx==0:
-        #     loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
-        # elif optimizer_idx==1:
-        #     loss = self.theta*view_loss + self.gamma*im2d_loss
-        # else:
-        #     loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss 
         
         if optimizer_idx==0:
             loss = self.alpha*im3d_loss + self.gamma*im2d_loss_ct 
@@ -487,6 +483,7 @@ class PixelNeRVLightningModule(LightningModule):
             # loss += d_loss
         else:
             loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond_xr
+        # loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond_xr
 
         if batch_idx==0:
             viz2d = torch.cat([
