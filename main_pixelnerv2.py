@@ -322,8 +322,8 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
             
         # Construct the random cameras
-        src_azim_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.8, max=0.8) # 
-        src_elev_random = torch.randn(self.batch_size, device=_device).clamp_(min=-0.8, max=0.8) # 
+        src_azim_random = torch.randn(self.batch_size, device=_device)
+        src_elev_random = torch.randn(self.batch_size, device=_device)
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_random = make_cameras(src_dist_random, src_elev_random, src_azim_random)
         
@@ -392,12 +392,6 @@ class PixelNeRVLightningModule(LightningModule):
         rec_figure_ct_random = self.forward_screen(image3d=est_volume_ct_random[:,1:], cameras=camera_random)
         rec_figure_ct_hidden = self.forward_screen(image3d=est_volume_ct_hidden[:,1:], cameras=camera_hidden)
         est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden[:,1:], cameras=camera_hidden)
-        
-        # rec_feat_hidden = self.forward_camera(
-        #     image2d=torch.cat([est_figure_ct_random, est_figure_xr_hidden])
-        # )
-
-        est_azim_random, est_elev_random = torch.split(est_feat_random, 1, dim=1)
 
         # Perform Post activation like DVGO      
         mid_volume_ct_random = est_volume_ct_random[:,:1]
