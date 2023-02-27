@@ -62,8 +62,8 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
             num_classes=out_channels,
             adv_prop=True,
         )
-        # self.model._fc.weight.data.zero_()
-        # self.model._fc.bias.data.zero_()
+        self.model._fc.weight.data.zero_()
+        self.model._fc.bias.data.zero_()
 
     def forward(self, figures):
         camfeat = self.model.forward(figures)
@@ -140,7 +140,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.2,
+                dropout=0.2,
             ),
         )
 
@@ -156,7 +156,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.2,
+                dropout=0.2,
             ),
         )
 
@@ -172,7 +172,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                # dropout=0.2,
+                dropout=0.2,
             ), 
         )
              
@@ -308,11 +308,11 @@ class PixelNeRVLightningModule(LightningModule):
             out_channels=256, # Bx1x16x16
             backbone=self.backbone,
         )
-        init_weights(self.inv_renderer, init_type="normal")
-        init_weights(self.cam_settings, init_type="normal")
-        init_weights(self.critic_model, init_type="normal")
-        self.cam_settings.model._fc.weight.data.zero_()
-        self.cam_settings.model._fc.bias.data.zero_()
+        # init_weights(self.inv_renderer, init_type="normal")
+        # init_weights(self.cam_settings, init_type="normal")
+        # init_weights(self.critic_model, init_type="normal")
+        # self.cam_settings.model._fc.weight.data.zero_()
+        # self.cam_settings.model._fc.bias.data.zero_()
         self.loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras):      
