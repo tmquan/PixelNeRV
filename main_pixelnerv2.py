@@ -198,11 +198,12 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             # shcomps = shcoeff*self.shbasis.repeat(clarity.shape[0], 1, 1, 1, 1) 
             sh_comps_raw = torch.einsum('abcde,bcde->abcde', shcoeff, self.shbasis)
             # Take the absolute value of the spherical harmonic components
-            # sh_comps_abs = torch.abs(sh_comps_raw)
-            sh_comps_max = sh_comps_raw.max()
-            sh_comps_min = sh_comps_raw.min()
+            sh_comps_abs = torch.abs(sh_comps_raw)
+            sh_comps_max = sh_comps_abs.max()
+            sh_comps_min = sh_comps_abs.min()
             # Normalize the spherical harmonic components
-            shcomps = (sh_comps_raw - sh_comps_min) / (sh_comps_max - sh_comps_min + 1e-8)
+            shcomps = (sh_comps_abs - sh_comps_min) / (sh_comps_max - sh_comps_min + 1e-8)
+            # shcomps = sh_comps_raw
         else:
             shcomps = shcoeff 
 
@@ -242,10 +243,8 @@ def init_weights(net, init_type='normal', init_gain=0.02):
             nn.init.constant_(m.bias.data, 0.0)
     # print('initialize network with %s' % init_type)
     net.apply(init_func)  # apply the initialization function <init_func>
-
 def mean_and_tanh(x, eps=1e-8): return ( F.tanh(x.mean(dim=1, keepdim=True)) * 0.5 + 0.5 )  
 def mean_and_relu(x, eps=1e-8): return ( F.relu(x.mean(dim=1, keepdim=True)) )  
-
 def make_cameras(dist, elev, azim):
     assert dist.device == elev.device == azim.device
     _device = dist.device
@@ -447,24 +446,24 @@ class PixelNeRVLightningModule(LightningModule):
         # self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
         
         if optimizer_idx==0:
-            loss = self.alpha*im3d_loss + self.gamma*im2d_loss_ct 
+            loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
             # loss += g_loss
         elif optimizer_idx==1:
-            loss = self.theta*view_loss + self.gamma*im2d_loss_xr + self.omega*view_cond_xr
+            loss = self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
             # loss += d_loss
         else:
-            loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond_xr
-        # loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond_xr
+            loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
+        # loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
 
         if batch_idx==0:
             viz2d = torch.cat([
                         torch.cat([image3d[..., self.shape//2, :], 
-                                   est_figure_ct_hidden,
                                    est_figure_ct_random,
+                                   est_figure_ct_hidden,
                                    ], dim=-2).transpose(2, 3),
                         torch.cat([est_volume_ct_hidden[..., self.shape//2, :],
-                                   rec_figure_ct_hidden,
                                    rec_figure_ct_random,
+                                   rec_figure_ct_hidden,
                                    ], dim=-2).transpose(2, 3),
                         torch.cat([image2d, 
                                    est_volume_xr_hidden[..., self.shape//2, :],
