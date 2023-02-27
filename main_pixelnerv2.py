@@ -36,7 +36,7 @@ from monai.networks.layers import Reshape
 from positional_encodings.torch_encodings import PositionalEncodingPermute3D
 from datamodule import UnpairedDataModule
 from dvr.renderer import DirectVolumeFrontToBackRenderer, minimized, normalized, standardized
-from gan.patchgan import PatchGANDiscriminator
+
 backbones = {
     "efficientnet-b0": (16, 24, 40, 112, 320),
     "efficientnet-b1": (16, 24, 40, 112, 320),
@@ -62,8 +62,8 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
             num_classes=out_channels,
             adv_prop=True,
         )
-        self.model._fc.weight.data.zero_()
-        self.model._fc.bias.data.zero_()
+        # self.model._fc.weight.data.zero_()
+        # self.model._fc.bias.data.zero_()
 
     def forward(self, figures):
         camfeat = self.model.forward(figures)
@@ -203,7 +203,6 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             sh_comps_min = sh_comps_abs.min()
             # Normalize the spherical harmonic components
             shcomps = (sh_comps_abs - sh_comps_min) / (sh_comps_max - sh_comps_min + 1e-8)
-            # shcomps = sh_comps_raw
         else:
             shcomps = shcoeff 
 
@@ -303,9 +302,17 @@ class PixelNeRVLightningModule(LightningModule):
             backbone=self.backbone,
         )
 
-        self.discriminator = PatchGANDiscriminator(in_channels=1, num_filters=64, num_layers=3)
-        # init_weights(self.inv_renderer, init_type="normal")
-        # init_weights(self.cam_settings, init_type="normal")
+        # self.critic_model = PatchGANDiscriminator(in_channels=1, num_filters=64, num_layers=3)
+        self.critic_model = PixelNeRVFrontToBackFrustumFeaturer(
+            in_channels=1, 
+            out_channels=256, # Bx1x16x16
+            backbone=self.backbone,
+        )
+        init_weights(self.inv_renderer, init_type="normal")
+        init_weights(self.cam_settings, init_type="normal")
+        init_weights(self.critic_model, init_type="normal")
+        self.cam_settings.model._fc.weight.data.zero_()
+        self.cam_settings.model._fc.bias.data.zero_()
         self.loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras):      
@@ -316,6 +323,9 @@ class PixelNeRVLightningModule(LightningModule):
 
     def forward_camera(self, image2d):
         return self.cam_settings(image2d * 2.0 - 1.0)
+
+    def forward_critic(self, image2d):
+        return self.critic_model(image2d * 2.0 - 1.0)
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -445,15 +455,15 @@ class PixelNeRVLightningModule(LightningModule):
         if optimizer_idx==0:
             # Compute generator loss
             fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
-            fake_scores = self.discriminator(fake_images)
+            fake_scores = self.forward_critic(fake_images)
             g_loss = F.softplus(-fake_scores).mean()
             loss = p_loss + g_loss
         elif optimizer_idx==1:
             # Compute discriminator loss
             real_images = torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden])
-            real_scores = self.discriminator(real_images)
+            real_scores = self.forward_critic(real_images)
             fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
-            fake_scores = self.discriminator(fake_images.detach())
+            fake_scores = self.forward_critic(fake_images.detach())
             d_loss = F.softplus(-real_scores).mean() + F.softplus(+fake_scores).mean()
             loss = d_loss
         else:
@@ -528,7 +538,7 @@ class PixelNeRVLightningModule(LightningModule):
                                         {'params': self.cam_settings.parameters()}
                                     ], lr=self.lr, betas=(0.9, 0.999))
         opt_dis = torch.optim.AdamW([
-                                        {'params': self.discriminator.parameters()},
+                                        {'params': self.critic_model.parameters()},
                                     ], lr=self.lr, betas=(0.9, 0.999))
         sch_gen = torch.optim.lr_scheduler.MultiStepLR(opt_gen, milestones=[100, 200], gamma=0.1)
         sch_dis = torch.optim.lr_scheduler.MultiStepLR(opt_dis, milestones=[100, 200], gamma=0.1)
