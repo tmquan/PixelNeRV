@@ -446,7 +446,7 @@ class PixelNeRVLightningModule(LightningModule):
             # Compute generator loss
             fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
             fake_scores = self.discriminator(fake_images)
-            g_loss = -torch.mean(fake_scores)
+            g_loss = F.softplus(-fake_scores).mean()
             loss = p_loss + g_loss
         elif optimizer_idx==1:
             # Compute discriminator loss
@@ -454,7 +454,7 @@ class PixelNeRVLightningModule(LightningModule):
             real_scores = self.discriminator(real_images)
             fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
             fake_scores = self.discriminator(fake_images.detach())
-            d_loss = -torch.mean(real_scores) + torch.mean(fake_scores)
+            d_loss = F.softplus(-real_scores).mean() + F.softplus(+fake_scores).mean()
             loss = d_loss
         else:
             loss = p_loss
