@@ -94,14 +94,15 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
             z, y, x = torch.meshgrid(zs, ys, xs)
             zyx = torch.stack([z, y, x], dim=-1) # torch.Size([100, 100, 100, 3])
             if self.sh==2: 
-                shw = rsh_cart_2(zyx) 
+                shw = rsh_cart_2(zyx.view(-1, 3)) 
                 assert out_channels == 9
             elif self.sh==3: 
-                shw = rsh_cart_3(zyx)
+                shw = rsh_cart_3(zyx.view(-1, 3))
                 assert out_channels == 16
             else:
                 ValueError("Spherical Harmonics only support 2 and 3 degree")
-            self.register_buffer('shbasis', shw.unsqueeze(0).permute(0, 4, 1, 2, 3))
+            # self.register_buffer('shbasis', shw.unsqueeze(0).permute(0, 4, 1, 2, 3))
+            self.register_buffer('shbasis', shw.view(out_channels, self.shape, self.shape, self.shape))
      
         self.clarity_net = UNet2DModel(
             sample_size=shape,  
@@ -187,18 +188,23 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         if self.pe > 0:
             density = self.density_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity], dim=1))
             mixture = self.mixture_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity, density], dim=1))
-            results = self.refiner_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity, density, mixture], dim=1))
+            shcoeff = self.refiner_net(torch.cat([self.encoded.repeat(clarity.shape[0], 1, 1, 1, 1), clarity, density, mixture], dim=1))
         else:
             density = self.density_net(torch.cat([clarity], dim=1))
             mixture = self.mixture_net(torch.cat([clarity, density], dim=1))
-            results = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
+            shcoeff = self.refiner_net(torch.cat([clarity, density, mixture], dim=1))
 
         if self.sh > 0:
-            volumes = results*self.shbasis.repeat(clarity.shape[0], 1, 1, 1, 1) 
+            # shcomps = shcoeff*self.shbasis.repeat(clarity.shape[0], 1, 1, 1, 1) 
+            sh_comps_raw = torch.einsum('abcde,bcde->abcde', shcoeff, self.shbasis)
+            # Take the absolute value of the spherical harmonic components
+            sh_comps_abs = torch.abs(sh_comps_raw)
+            # Normalize the spherical harmonic components
+            shcomps = sh_comps_abs / (torch.max(sh_comps_abs) + 1e-8)
         else:
-            volumes = results 
+            shcomps = shcoeff 
 
-        volumes = torch.cat([clarity, volumes], dim=1)
+        volumes = torch.cat([clarity, shcomps], dim=1)
         volumes_ct, volumes_xr = torch.split(volumes, 1)
         volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
         volumes = torch.cat([volumes_ct, volumes_xr])
@@ -407,13 +413,13 @@ class PixelNeRVLightningModule(LightningModule):
         #     rec_figure_ct_locked = rec_figure_ct_locked.detach()
         #     est_figure_xr_hidden = est_figure_xr_hidden.detach()
 
-        rec_feat_random, \
-        rec_feat_locked, \
-        rec_feat_hidden = torch.split(
-            self.forward_camera(
-                image2d=torch.cat([rec_figure_ct_random, rec_figure_ct_locked, est_figure_xr_hidden])
-            ), self.batch_size
-        )
+        # rec_feat_random, \
+        # rec_feat_locked, \
+        # rec_feat_hidden = torch.split(
+        #     self.forward_camera(
+        #         image2d=torch.cat([rec_figure_ct_random, rec_figure_ct_locked, est_figure_xr_hidden])
+        #     ), self.batch_size
+        # )
 
         # rec_azim_random, rec_elev_random, rec_prob_random = torch.split(rec_feat_random, 1, dim=1)
         # rec_azim_locked, rec_elev_locked, rec_prob_locked = torch.split(rec_feat_locked, 1, dim=1)
@@ -422,7 +428,6 @@ class PixelNeRVLightningModule(LightningModule):
         # rec_azim_random, rec_elev_random = torch.split(rec_feat_random, 1, dim=1)
         # rec_azim_locked, rec_elev_locked = torch.split(rec_feat_locked, 1, dim=1)
         # rec_azim_hidden, rec_elev_hidden = torch.split(rec_feat_hidden, 1, dim=1)
-
 
         # Perform Post activation like DVGO      
         mid_volume_ct_random = est_volume_ct_random[:,:1]
@@ -437,6 +442,7 @@ class PixelNeRVLightningModule(LightningModule):
         # g_loss = -torch.mean(rec_prob_random) - torch.mean(rec_prob_locked) - torch.mean(rec_prob_hidden)
         # d_loss = -torch.mean(est_prob_random) - torch.mean(est_prob_locked) - torch.mean(est_prob_hidden) \
         #          +torch.mean(rec_prob_random) + torch.mean(rec_prob_locked) + torch.mean(rec_prob_hidden)
+
         # Per-pixel_loss
         im3d_loss_ct_random = self.loss(image3d, est_volume_ct_random) + self.loss(image3d, mid_volume_ct_random) 
         im3d_loss_ct_locked = self.loss(image3d, est_volume_ct_locked) + self.loss(image3d, mid_volume_ct_locked) 
