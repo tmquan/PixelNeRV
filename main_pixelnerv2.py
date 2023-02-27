@@ -36,7 +36,7 @@ from monai.networks.layers import Reshape
 from positional_encodings.torch_encodings import PositionalEncodingPermute3D
 from datamodule import UnpairedDataModule
 from dvr.renderer import DirectVolumeFrontToBackRenderer, minimized, normalized, standardized
-
+from gan.patchgan import PatchGANDiscriminator
 backbones = {
     "efficientnet-b0": (16, 24, 40, 112, 320),
     "efficientnet-b1": (16, 24, 40, 112, 320),
@@ -303,6 +303,7 @@ class PixelNeRVLightningModule(LightningModule):
             backbone=self.backbone,
         )
 
+        self.discriminator = PatchGANDiscriminator(in_channels=1, num_filters=64, num_layers=3)
         # init_weights(self.inv_renderer, init_type="normal")
         # init_weights(self.cam_settings, init_type="normal")
         self.loss = nn.L1Loss(reduction="mean")
@@ -439,15 +440,24 @@ class PixelNeRVLightningModule(LightningModule):
         # self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
         # self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
         
+        p_loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
+    
         if optimizer_idx==0:
-            loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
-            # loss += g_loss
+            # Compute generator loss
+            fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
+            fake_scores = self.discriminator(fake_images)
+            g_loss = -torch.mean(fake_scores)
+            loss = p_loss + g_loss
         elif optimizer_idx==1:
-            loss = self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
-            # loss += d_loss
+            # Compute discriminator loss
+            real_images = torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden])
+            real_scores = self.discriminator(real_images)
+            fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
+            fake_scores = self.discriminator(fake_images.detach())
+            d_loss = -torch.mean(real_scores) + torch.mean(fake_scores)
+            loss = d_loss
         else:
-            loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
-        # loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
+            loss = p_loss
 
         if batch_idx==0:
             viz2d = torch.cat([
@@ -495,16 +505,34 @@ class PixelNeRVLightningModule(LightningModule):
     def test_epoch_end(self, outputs):
         return self._common_epoch_end(outputs, stage='test')
 
+    def configure_gradient_clipping(self, optimizer, optimizer_idx, gradient_clip_val, gradient_clip_algorithm):
+        if optimizer_idx == 1:
+            # Lightning will handle the gradient clipping
+            self.clip_gradients(
+                optimizer,
+                gradient_clip_val=gradient_clip_val,
+                gradient_clip_algorithm=gradient_clip_algorithm
+            )
+
     def configure_optimizers(self):
         # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
         # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
         # return [optimizer], [scheduler]
-        opt_inv = torch.optim.AdamW(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        opt_cam = torch.optim.AdamW(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
-        sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
-        return [opt_inv, opt_cam], [sch_inv, sch_cam]
-
+        # opt_inv = torch.optim.AdamW(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        # opt_cam = torch.optim.AdamW(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        # sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
+        # sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
+        # return [opt_inv, opt_cam], [sch_inv, sch_cam]
+        opt_gen = torch.optim.AdamW([
+                                        {'params': self.inv_renderer.parameters()},
+                                        {'params': self.cam_settings.parameters()}
+                                    ], lr=self.lr, betas=(0.9, 0.999))
+        opt_dis = torch.optim.AdamW([
+                                        {'params': self.discriminator.parameters()},
+                                    ], lr=self.lr, betas=(0.9, 0.999))
+        sch_gen = torch.optim.lr_scheduler.MultiStepLR(opt_gen, milestones=[100, 200], gamma=0.1)
+        sch_dis = torch.optim.lr_scheduler.MultiStepLR(opt_dis, milestones=[100, 200], gamma=0.1)
+        return [opt_gen, opt_dis], [sch_gen, sch_dis]
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -576,6 +604,8 @@ if __name__ == "__main__":
         strategy="ddp_sharded",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         # plugins=DDPStrategy(find_unused_parameters=False),
         precision=16 if hparams.amp else 32,
+        gradient_clip_val=0.01, 
+        gradient_clip_algorithm="value"
         # stochastic_weight_avg=True,
         # deterministic=False,
         # profiler="simple",
