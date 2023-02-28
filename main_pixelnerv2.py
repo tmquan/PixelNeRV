@@ -62,8 +62,8 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
             num_classes=out_channels,
             adv_prop=True,
         )
-        self.model._fc.weight.data.zero_()
-        self.model._fc.bias.data.zero_()
+        # self.model._fc.weight.data.zero_()
+        # self.model._fc.bias.data.zero_()
 
     def forward(self, figures):
         camfeat = self.model.forward(figures)
@@ -301,18 +301,22 @@ class PixelNeRVLightningModule(LightningModule):
             out_channels=2, # azim + elev + prob
             backbone=self.backbone,
         )
-
-        # self.critic_model = PatchGANDiscriminator(in_channels=1, num_filters=64, num_layers=3)
+        
         self.critic_model = PixelNeRVFrontToBackFrustumFeaturer(
             in_channels=1, 
-            out_channels=256, # Bx1x16x16
+            out_channels=1, # Bx1x16x16
             backbone=self.backbone,
         )
+
         # init_weights(self.inv_renderer, init_type="normal")
         # init_weights(self.cam_settings, init_type="normal")
         # init_weights(self.critic_model, init_type="normal")
-        # self.cam_settings.model._fc.weight.data.zero_()
-        # self.cam_settings.model._fc.bias.data.zero_()
+
+        self.cam_settings.model._fc.weight.data.zero_()
+        self.cam_settings.model._fc.bias.data.zero_()
+        self.critic_model.model._fc.weight.data.zero_()
+        self.critic_model.model._fc.bias.data.zero_()
+
         self.loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras):      
@@ -447,9 +451,6 @@ class PixelNeRVLightningModule(LightningModule):
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-        # self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
-        # self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
-        
         p_loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
     
         if optimizer_idx==0:
@@ -458,6 +459,8 @@ class PixelNeRVLightningModule(LightningModule):
             fake_scores = self.forward_critic(fake_images)
             g_loss = F.softplus(-fake_scores).mean()
             loss = p_loss + g_loss
+            self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
+        
         elif optimizer_idx==1:
             # Compute discriminator loss
             real_images = torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden])
@@ -466,6 +469,8 @@ class PixelNeRVLightningModule(LightningModule):
             fake_scores = self.forward_critic(fake_images.detach())
             d_loss = F.softplus(-real_scores).mean() + F.softplus(+fake_scores).mean()
             loss = d_loss
+            self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
+        
         else:
             loss = p_loss
 
@@ -533,13 +538,13 @@ class PixelNeRVLightningModule(LightningModule):
         # sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
         # sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
         # return [opt_inv, opt_cam], [sch_inv, sch_cam]
-        opt_gen = torch.optim.AdamW([
-                                        {'params': self.inv_renderer.parameters()},
-                                        {'params': self.cam_settings.parameters()}
-                                    ], lr=self.lr, betas=(0.9, 0.999))
-        opt_dis = torch.optim.AdamW([
-                                        {'params': self.critic_model.parameters()},
-                                    ], lr=self.lr, betas=(0.9, 0.999))
+        opt_gen = torch.optim.Adam([
+            {'params': self.inv_renderer.parameters()},
+            {'params': self.cam_settings.parameters()}
+        ], lr=self.lr, betas=(0.9, 0.999))
+        opt_dis = torch.optim.Adam([
+            {'params': self.critic_model.parameters()},
+        ], lr=self.lr, betas=(0.9, 0.999))
         sch_gen = torch.optim.lr_scheduler.MultiStepLR(opt_gen, milestones=[100, 200], gamma=0.1)
         sch_dis = torch.optim.lr_scheduler.MultiStepLR(opt_dis, milestones=[100, 200], gamma=0.1)
         return [opt_gen, opt_dis], [sch_gen, sch_dis]
