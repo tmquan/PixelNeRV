@@ -457,17 +457,20 @@ class PixelNeRVLightningModule(LightningModule):
             # Compute generator loss
             fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
             fake_scores = self.forward_critic(fake_images)
-            g_loss = F.softplus(-fake_scores).mean()
+            g_loss = -torch.mean(fake_scores)
             loss = p_loss + g_loss
             self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
         
         elif optimizer_idx==1:
+            # Clamp parameters to enforce Lipschitz constraint
+            for p in self.critic_model.parameters():
+                p.data.clamp_(-0.01, 0.01)
             # Compute discriminator loss
             real_images = torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden])
             real_scores = self.forward_critic(real_images)
             fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
             fake_scores = self.forward_critic(fake_images.detach())
-            d_loss = F.softplus(-real_scores).mean() + F.softplus(+fake_scores).mean()
+            d_loss = -torch.mean(real_scores) + torch.mean(fake_scores)
             loss = d_loss
             self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
         
@@ -520,14 +523,14 @@ class PixelNeRVLightningModule(LightningModule):
     def test_epoch_end(self, outputs):
         return self._common_epoch_end(outputs, stage='test')
 
-    def configure_gradient_clipping(self, optimizer, optimizer_idx, gradient_clip_val, gradient_clip_algorithm):
-        if optimizer_idx == 1:
-            # Lightning will handle the gradient clipping
-            self.clip_gradients(
-                optimizer,
-                gradient_clip_val=gradient_clip_val,
-                gradient_clip_algorithm=gradient_clip_algorithm
-            )
+    # def configure_gradient_clipping(self, optimizer, optimizer_idx, gradient_clip_val, gradient_clip_algorithm):
+    #     if optimizer_idx == 1:
+    #         # Lightning will handle the gradient clipping
+    #         self.clip_gradients(
+    #             optimizer,
+    #             gradient_clip_val=gradient_clip_val,
+    #             gradient_clip_algorithm=gradient_clip_algorithm
+    #         )
 
     def configure_optimizers(self):
         # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
@@ -541,10 +544,10 @@ class PixelNeRVLightningModule(LightningModule):
         opt_gen = torch.optim.Adam([
             {'params': self.inv_renderer.parameters()},
             {'params': self.cam_settings.parameters()}
-        ], lr=self.lr, betas=(0.9, 0.999))
+        ], lr=self.lr, betas=(0.5, 0.999))
         opt_dis = torch.optim.Adam([
             {'params': self.critic_model.parameters()},
-        ], lr=self.lr, betas=(0.9, 0.999))
+        ], lr=self.lr, betas=(0.5, 0.999))
         sch_gen = torch.optim.lr_scheduler.MultiStepLR(opt_gen, milestones=[100, 200], gamma=0.1)
         sch_dis = torch.optim.lr_scheduler.MultiStepLR(opt_dis, milestones=[100, 200], gamma=0.1)
         return [opt_gen, opt_dis], [sch_gen, sch_dis]
@@ -619,8 +622,8 @@ if __name__ == "__main__":
         strategy="ddp_sharded",  # "colossalai", "fsdp", #"ddp_sharded", #"horovod", #"deepspeed", #"ddp_sharded",
         # plugins=DDPStrategy(find_unused_parameters=False),
         precision=16 if hparams.amp else 32,
-        gradient_clip_val=0.01, 
-        gradient_clip_algorithm="value"
+        # gradient_clip_val=0.01, 
+        # gradient_clip_algorithm="value"
         # stochastic_weight_avg=True,
         # deterministic=False,
         # profiler="simple",
