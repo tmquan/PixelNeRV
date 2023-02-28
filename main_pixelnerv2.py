@@ -556,11 +556,11 @@ class PixelNeRVLightningModule(LightningModule):
         # sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
         # sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
         # return [opt_inv, opt_cam], [sch_inv, sch_cam]
-        opt_gen = torch.optim.Adam([
+        opt_gen = torch.optim.AdamW([
             {'params': self.inv_renderer.parameters()},
             {'params': self.cam_settings.parameters()}
         ], lr=self.lr, betas=(0.5, 0.999))
-        opt_dis = torch.optim.Adam([
+        opt_dis = torch.optim.AdamW([
             {'params': self.critic_model.parameters()},
         ], lr=self.lr, betas=(0.5, 0.999))
         sch_gen = torch.optim.lr_scheduler.MultiStepLR(opt_gen, milestones=[100, 200], gamma=0.1)
