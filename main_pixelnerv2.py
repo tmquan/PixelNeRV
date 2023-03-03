@@ -265,6 +265,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.gamma = hparams.gamma
         self.theta = hparams.theta
         self.omega = hparams.omega
+        self.lambda_gp = hparams.lambda_gp
        
         self.logsdir = hparams.logsdir
        
@@ -335,8 +336,8 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
             
         # Construct the random cameras
-        src_azim_random = torch.randn(self.batch_size, device=_device)
-        src_elev_random = torch.randn(self.batch_size, device=_device)
+        src_azim_random = torch.randn(self.batch_size, device=_device).clamp_(-0.9, 0.9)
+        src_elev_random = torch.randn(self.batch_size, device=_device).clamp_(-0.9, 0.9)
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_random = make_cameras(src_dist_random, src_elev_random, src_azim_random)
 
@@ -457,15 +458,32 @@ class PixelNeRVLightningModule(LightningModule):
                 self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
             
             elif optimizer_idx==1:
-                # Clamp parameters to enforce Lipschitz constraint
-                for p in self.critic_model.parameters():
-                    p.data.clamp_(-0.01, 0.01)
+                # # Clamp parameters to enforce Lipschitz constraint
+                # for p in self.critic_model.parameters():
+                #     p.data.clamp_(-0.01, 0.01)
+                
                 # Compute discriminator loss
                 real_images = torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden])
                 real_scores = self.forward_critic(real_images)
                 fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
                 fake_scores = self.forward_critic(fake_images.detach())
-                d_loss = -torch.mean(real_scores) + torch.mean(fake_scores)
+
+                # Calculate gradient penalty
+                epsilon = torch.rand(self.batch_size, 1, 1, 1).to(_device)
+                grad_images = (epsilon * real_images + (1 - epsilon) * fake_images).requires_grad_(True)
+                grad_scores = self.forward_critic(grad_images)
+                grad_outputs = torch.ones_like(grad_scores)
+                gradients = torch.autograd.grad(
+                    outputs=grad_scores,
+                    inputs=grad_images,
+                    grad_outputs=grad_outputs,
+                    create_graph=True,
+                    retain_graph=True,
+                    only_inputs=True
+                )[0]
+                gradient_penalty = self.lambda_gp * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+                #
+                d_loss = -torch.mean(real_scores) + torch.mean(fake_scores) + gradient_penalty
                 loss = d_loss
                 self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
             
@@ -569,6 +587,7 @@ if __name__ == "__main__":
     parser.add_argument("--gamma", type=float, default=1., help="img loss")
     parser.add_argument("--theta", type=float, default=1., help="cam loss")
     parser.add_argument("--omega", type=float, default=1., help="cam cond")
+    parser.add_argument("--lambda_gp", type=float, default=10, help="gradient penalty")
     
     parser.add_argument("--lr", type=float, default=2e-4, help="adam: learning rate")
     parser.add_argument("--ckpt", type=str, default=None, help="path to checkpoint")
