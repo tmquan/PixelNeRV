@@ -313,8 +313,8 @@ class PixelNeRVLightningModule(LightningModule):
                 out_channels=1, # Bx1x16x16
                 backbone=self.backbone,
             )
-            self.critic_model.model._fc.weight.data.zero_()
-            self.critic_model.model._fc.bias.data.zero_()
+            # self.critic_model.model._fc.weight.data.zero_()
+            # self.critic_model.model._fc.bias.data.zero_()
 
         self.loss = nn.L1Loss(reduction="mean")
 
