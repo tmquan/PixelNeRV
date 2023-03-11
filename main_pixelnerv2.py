@@ -298,23 +298,6 @@ class PixelNeRVLightningModule(LightningModule):
             backbone=self.backbone,
         )
 
-        # self.cam_settings = PixelNeRVFrontToBackFrustumFeaturer(
-        #     in_channels=1, 
-        #     out_channels=2, # azim + elev + prob
-        #     backbone=self.backbone,
-        # )
-        
-        # self.cam_settings.model._fc.weight.data.zero_()
-        # self.cam_settings.model._fc.bias.data.zero_()
-        
-        # if self.gan:
-        #     self.critic_model = PixelNeRVFrontToBackFrustumFeaturer(
-        #         in_channels=1, 
-        #         out_channels=1, # Bx1x16x16
-        #         backbone=self.backbone,
-        #     )
-        #     # self.critic_model.model._fc.weight.data.zero_()
-        #     # self.critic_model.model._fc.bias.data.zero_()
         self.cam_settings = PixelNeRVFrontToBackFrustumFeaturer(
             in_channels=1, 
             out_channels=3, # azim + elev + prob
@@ -331,10 +314,7 @@ class PixelNeRVLightningModule(LightningModule):
         return self.inv_renderer(image2d * 2.0 - 1.0, azim.squeeze(), elev.squeeze(), n_views) 
 
     def forward_camera(self, image2d):
-        return self.cam_settings(image2d * 2.0 - 1.0)[:,:2]
-
-    def forward_critic(self, image2d):
-        return self.cam_settings(image2d * 2.0 - 1.0)[:,2:]
+        return self.cam_settings(image2d * 2.0 - 1.0)
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -456,43 +436,27 @@ class PixelNeRVLightningModule(LightningModule):
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         p_loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
         c_loss = self.theta*view_loss + self.omega*view_cond
-
+        
         if self.gan:
             if optimizer_idx==0:
                 # Compute generator loss
                 fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
                 fake_scores = self.forward_critic(fake_images)
-                g_loss = -torch.mean(fake_scores)
+                # g_loss = -torch.mean(fake_scores)
+                g_loss = F.binary_cross_entropy(fake_scores, torch.ones_like(fake_scores))
                 loss = p_loss + g_loss
                 self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
             
             elif optimizer_idx==1:
-                # # Clamp parameters to enforce Lipschitz constraint
-                # for p in self.critic_model.parameters():
-                #     p.data.clamp_(-0.01, 0.01)
-                
                 # Compute discriminator loss
                 real_images = torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden])
                 real_scores = self.forward_critic(real_images)
                 fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
                 fake_scores = self.forward_critic(fake_images.detach())
 
-                # # Calculate gradient penalty
-                # epsilon = torch.rand(self.batch_size, 1, 1, 1).to(_device)
-                # grad_images = (epsilon * real_images + (1 - epsilon) * fake_images).requires_grad_(True)
-                # grad_scores = self.forward_critic(grad_images)
-                # grad_outputs = torch.ones_like(grad_scores)
-                # gradients = torch.autograd.grad(
-                #     outputs=grad_scores,
-                #     inputs=grad_images,
-                #     grad_outputs=grad_outputs,
-                #     create_graph=True,
-                #     retain_graph=True,
-                #     only_inputs=True
-                # )[0]
-                # gradient_penalty = self.lambda_gp * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
-                # #
-                d_loss = -torch.mean(real_scores) + torch.mean(fake_scores) # + gradient_penalty
+                # d_loss = -torch.mean(real_scores) + torch.mean(fake_scores) # + gradient_penalty
+                d_loss = F.binary_cross_entropy(real_scores, torch.ones_like(real_scores)) \
+                       + F.binary_cross_entropy(fake_scores, torch.zeros_like(fake_scores)) 
                 loss = c_loss + d_loss
                 self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
             
@@ -559,7 +523,6 @@ class PixelNeRVLightningModule(LightningModule):
         if self.gan:
             opt_gen = torch.optim.AdamW([
                 {'params': self.inv_renderer.parameters()},
-                # {'params': self.cam_settings.parameters()}
             ], lr=self.lr, betas=(0.5, 0.999))
             opt_dis = torch.optim.AdamW([
                 {'params': self.cam_settings.parameters()},
