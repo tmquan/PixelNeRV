@@ -314,7 +314,10 @@ class PixelNeRVLightningModule(LightningModule):
         return self.inv_renderer(image2d * 2.0 - 1.0, azim.squeeze(), elev.squeeze(), n_views) 
 
     def forward_camera(self, image2d):
-        return self.cam_settings(image2d * 2.0 - 1.0)
+        return self.cam_settings(image2d * 2.0 - 1.0)[:,:2]
+
+    def forward_critic(self, image2d):
+        return self.cam_settings(image2d * 2.0 - 1.0)[:,2:]
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -436,7 +439,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         p_loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
         c_loss = self.theta*view_loss + self.omega*view_cond
-        
+
         if self.gan:
             if optimizer_idx==0:
                 # Compute generator loss
