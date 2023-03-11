@@ -446,7 +446,7 @@ class PixelNeRVLightningModule(LightningModule):
                 fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
                 fake_scores = self.forward_critic(fake_images)
                 # g_loss = -torch.mean(fake_scores)
-                g_loss = F.binary_cross_entropy(fake_scores, torch.ones_like(fake_scores))
+                g_loss = F.binary_cross_entropy_with_logits(fake_scores, torch.ones_like(fake_scores))
                 loss = p_loss + g_loss
                 self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
             
@@ -458,8 +458,8 @@ class PixelNeRVLightningModule(LightningModule):
                 fake_scores = self.forward_critic(fake_images.detach())
 
                 # d_loss = -torch.mean(real_scores) + torch.mean(fake_scores) # + gradient_penalty
-                d_loss = F.binary_cross_entropy(real_scores, torch.ones_like(real_scores)) \
-                       + F.binary_cross_entropy(fake_scores, torch.zeros_like(fake_scores)) 
+                d_loss = F.binary_cross_entropy_with_logits(real_scores, torch.ones_like(real_scores)) \
+                       + F.binary_cross_entropy_with_logits(fake_scores, torch.zeros_like(fake_scores)) 
                 loss = c_loss + d_loss
                 self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
             
