@@ -456,14 +456,14 @@ class PixelNeRVLightningModule(LightningModule):
                 fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
                 fake_scores = self.forward_critic(fake_images)
                 # g_loss = -torch.mean(fake_scores)
-                g_loss = torch.relu(1 - fake_scores).mean()
+                g_loss = F.softplus(-fake_scores).mean()
                 loss = p_loss + g_loss
                 self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
             
             elif optimizer_idx==1:
                 # Clamp parameters to enforce Lipschitz constraint
-                # for p in self.critic_model.parameters():
-                #     p.data.clamp_(-0.01, 0.01)
+                for p in self.critic_model.parameters():
+                    p.data.clamp_(-0.01, 0.01)
                 
                 # Compute discriminator loss
                 real_images = torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden])
@@ -471,27 +471,10 @@ class PixelNeRVLightningModule(LightningModule):
                 fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
                 fake_scores = self.forward_critic(fake_images.detach())
 
-                # Calculate gradient penalty
-                epsilon = torch.rand(self.batch_size, 1, 1, 1).to(_device)
-                grad_images = (epsilon * real_images + (1 - epsilon) * fake_images).requires_grad_(True)
-                grad_scores = self.forward_critic(grad_images)
-                grad_outputs = torch.ones_like(grad_scores)
-                gradients = torch.autograd.grad(
-                    outputs=grad_scores,
-                    inputs=grad_images,
-                    grad_outputs=grad_outputs,
-                    create_graph=True,
-                    retain_graph=True,
-                    only_inputs=True
-                )[0]
-                gr_pen = self.lambda_gp * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
-                # 
-                # d_loss = -torch.mean(real_scores) + torch.mean(fake_scores) # + gr_pen
-                d_loss = (torch.relu(1 - real_scores).mean() + torch.relu(1 + fake_scores).mean()) / 2
-                loss = d_loss + gr_pen
+                d_loss = F.softplus(-real_scores).mean() + F.softplus(+fake_scores).mean()
+                loss = d_loss 
                 self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
-                self.log(f'{stage}_gr_pen', gr_pen, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
-            
+                
             else:
                 loss = p_loss
         else:
