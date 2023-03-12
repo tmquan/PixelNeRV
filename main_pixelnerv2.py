@@ -455,24 +455,42 @@ class PixelNeRVLightningModule(LightningModule):
                 # Compute generator loss
                 fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
                 fake_scores = self.forward_critic(fake_images)
-                
                 # g_loss = -torch.mean(fake_scores)
-                g_loss = F.binary_cross_entropy_with_logits(fake_scores, torch.ones_like(fake_scores))
+                g_loss = torch.relu(1 - fake_scores).mean()
                 loss = p_loss + g_loss
                 self.log(f'{stage}_g_loss', g_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
             
             elif optimizer_idx==1:
+                # Clamp parameters to enforce Lipschitz constraint
+                # for p in self.critic_model.parameters():
+                #     p.data.clamp_(-0.01, 0.01)
+                
                 # Compute discriminator loss
                 real_images = torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden])
-                fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
                 real_scores = self.forward_critic(real_images)
+                fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
                 fake_scores = self.forward_critic(fake_images.detach())
 
-                # d_loss = -torch.mean(real_scores) + torch.mean(fake_scores) # + gradient_penalty
-                d_loss = F.binary_cross_entropy_with_logits(real_scores, torch.ones_like(real_scores)) \
-                       + F.binary_cross_entropy_with_logits(fake_scores, torch.zeros_like(fake_scores)) 
-                loss = d_loss
+                # Calculate gradient penalty
+                epsilon = torch.rand(self.batch_size, 1, 1, 1).to(_device)
+                grad_images = (epsilon * real_images + (1 - epsilon) * fake_images).requires_grad_(True)
+                grad_scores = self.forward_critic(grad_images)
+                grad_outputs = torch.ones_like(grad_scores)
+                gradients = torch.autograd.grad(
+                    outputs=grad_scores,
+                    inputs=grad_images,
+                    grad_outputs=grad_outputs,
+                    create_graph=True,
+                    retain_graph=True,
+                    only_inputs=True
+                )[0]
+                gr_pen = self.lambda_gp * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+                # 
+                # d_loss = -torch.mean(real_scores) + torch.mean(fake_scores) # + gr_pen
+                d_loss = (torch.relu(1 - real_scores).mean() + torch.relu(1 + fake_scores).mean()) / 2
+                loss = d_loss + gr_pen
                 self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
+                self.log(f'{stage}_gr_pen', gr_pen, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
             
             else:
                 loss = p_loss
@@ -549,6 +567,7 @@ class PixelNeRVLightningModule(LightningModule):
             optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.5, 0.999))
             scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
             return [optimizer], [scheduler]
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--conda_env", type=str, default="Unet")
