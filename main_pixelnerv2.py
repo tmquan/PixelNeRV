@@ -455,6 +455,7 @@ class PixelNeRVLightningModule(LightningModule):
                 # Compute generator loss
                 fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
                 fake_scores = self.forward_critic(fake_images)
+                
                 # g_loss = -torch.mean(fake_scores)
                 g_loss = F.binary_cross_entropy_with_logits(fake_scores, torch.ones_like(fake_scores))
                 loss = p_loss + g_loss
@@ -463,9 +464,10 @@ class PixelNeRVLightningModule(LightningModule):
             elif optimizer_idx==1:
                 # Compute discriminator loss
                 real_images = torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden])
-                real_scores = self.forward_critic(real_images)
                 fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
+                real_scores = self.forward_critic(real_images)
                 fake_scores = self.forward_critic(fake_images.detach())
+
                 # d_loss = -torch.mean(real_scores) + torch.mean(fake_scores) # + gradient_penalty
                 d_loss = F.binary_cross_entropy_with_logits(real_scores, torch.ones_like(real_scores)) \
                        + F.binary_cross_entropy_with_logits(fake_scores, torch.zeros_like(fake_scores)) 
@@ -524,6 +526,14 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
+        # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
+        # return [optimizer], [scheduler]
+        # opt_inv = torch.optim.AdamW(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        # opt_cam = torch.optim.AdamW(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        # sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
+        # sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
+        # return [opt_inv, opt_cam], [sch_inv, sch_cam]
         if self.gan:
             opt_gen = torch.optim.AdamW([
                 {'params': self.inv_renderer.parameters()},
@@ -539,7 +549,6 @@ class PixelNeRVLightningModule(LightningModule):
             optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.5, 0.999))
             scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
             return [optimizer], [scheduler]
-
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--conda_env", type=str, default="Unet")
