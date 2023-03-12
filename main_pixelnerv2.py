@@ -140,7 +140,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                dropout=0.2,
+                # dropout=0.2,
             ),
         )
 
@@ -156,7 +156,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                dropout=0.2,
+                # dropout=0.2,
             ),
         )
 
@@ -172,7 +172,7 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
                 up_kernel_size=3,
                 act=("LeakyReLU", {"inplace": True}),
                 norm=Norm.BATCH,
-                dropout=0.2,
+                # dropout=0.2,
             ), 
         )
              
@@ -300,11 +300,22 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.cam_settings = PixelNeRVFrontToBackFrustumFeaturer(
             in_channels=1, 
-            out_channels=3, # azim + elev + prob
+            out_channels=2, # azim + elev + prob
             backbone=self.backbone,
         )
-        self.cam_settings.model._fc.weight.data[:2].zero_()
-        self.cam_settings.model._fc.bias.data[:2].zero_()
+        
+        self.cam_settings.model._fc.weight.data.zero_()
+        self.cam_settings.model._fc.bias.data.zero_()
+
+        if self.gan:
+            self.critic_model = PixelNeRVFrontToBackFrustumFeaturer(
+                in_channels=1, 
+                out_channels=1, # Bx1x16x16
+                backbone=self.backbone,
+            )
+            # self.critic_model.model._fc.weight.data.zero_()
+            # self.critic_model.model._fc.bias.data.zero_()
+
         self.loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras):      
@@ -314,10 +325,10 @@ class PixelNeRVLightningModule(LightningModule):
         return self.inv_renderer(image2d * 2.0 - 1.0, azim.squeeze(), elev.squeeze(), n_views) 
 
     def forward_camera(self, image2d):
-        return self.cam_settings(image2d * 2.0 - 1.0)[:,:2]
+        return self.cam_settings(image2d * 2.0 - 1.0)
 
     def forward_critic(self, image2d):
-        return self.cam_settings(image2d * 2.0 - 1.0)[:,2:]
+        return self.critic_model(image2d * 2.0 - 1.0)
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -437,8 +448,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         self.log(f'{stage}_view_loss', view_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-        p_loss = self.alpha*im3d_loss + self.gamma*im2d_loss 
-        c_loss = self.theta*view_loss + self.omega*view_cond
+        p_loss = self.alpha*im3d_loss + self.theta*view_loss + self.gamma*im2d_loss + self.omega*view_cond
 
         if self.gan:
             if optimizer_idx==0:
@@ -456,17 +466,16 @@ class PixelNeRVLightningModule(LightningModule):
                 real_scores = self.forward_critic(real_images)
                 fake_images = torch.cat([rec_figure_ct_random, rec_figure_ct_hidden, est_figure_xr_hidden])
                 fake_scores = self.forward_critic(fake_images.detach())
-
                 # d_loss = -torch.mean(real_scores) + torch.mean(fake_scores) # + gradient_penalty
                 d_loss = F.binary_cross_entropy_with_logits(real_scores, torch.ones_like(real_scores)) \
                        + F.binary_cross_entropy_with_logits(fake_scores, torch.zeros_like(fake_scores)) 
-                loss = c_loss + d_loss
+                loss = d_loss
                 self.log(f'{stage}_d_loss', d_loss, on_step=(stage=='train'), prog_bar=False, logger=True, sync_dist=True, batch_size=self.batch_size)
             
             else:
-                loss = p_loss + c_loss
+                loss = p_loss
         else:
-            loss = p_loss + c_loss
+            loss = p_loss
 
         if batch_idx==0:
             viz2d = torch.cat([
@@ -515,20 +524,13 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
-        # return [optimizer], [scheduler]
-        # opt_inv = torch.optim.AdamW(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        # opt_cam = torch.optim.AdamW(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        # sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
-        # sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
-        # return [opt_inv, opt_cam], [sch_inv, sch_cam]
         if self.gan:
             opt_gen = torch.optim.AdamW([
                 {'params': self.inv_renderer.parameters()},
+                {'params': self.cam_settings.parameters()}
             ], lr=self.lr, betas=(0.5, 0.999))
             opt_dis = torch.optim.AdamW([
-                {'params': self.cam_settings.parameters()},
+                {'params': self.critic_model.parameters()},
             ], lr=self.lr, betas=(0.5, 0.999))
             sch_gen = torch.optim.lr_scheduler.MultiStepLR(opt_gen, milestones=[100, 200], gamma=0.1)
             sch_dis = torch.optim.lr_scheduler.MultiStepLR(opt_dis, milestones=[100, 200], gamma=0.1)
@@ -537,7 +539,7 @@ class PixelNeRVLightningModule(LightningModule):
             optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.5, 0.999))
             scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
             return [optimizer], [scheduler]
-            
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--conda_env", type=str, default="Unet")
