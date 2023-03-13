@@ -35,7 +35,11 @@ from monai.networks.layers import Reshape
 
 from positional_encodings.torch_encodings import PositionalEncodingPermute3D
 from datamodule import UnpairedDataModule
-from dvr.renderer import DirectVolumeFrontToBackRenderer, minimized, normalized, standardized
+from dvr.renderer import (
+    DirectVolumeFrontToBackRenderer, 
+    DirectVolumeStratifiedFrontToBackRenderer,
+    minimized, normalized, standardized
+)
 
 backbones = {
     "efficientnet-b0": (16, 24, 40, 112, 320),
@@ -62,8 +66,6 @@ class PixelNeRVFrontToBackFrustumFeaturer(nn.Module):
             num_classes=out_channels,
             adv_prop=True,
         )
-        # self.model._fc.weight.data.zero_()
-        # self.model._fc.bias.data.zero_()
 
     def forward(self, figures):
         camfeat = self.model.forward(figures)
@@ -210,40 +212,8 @@ class PixelNeRVFrontToBackInverseRenderer(nn.Module):
         volumes_ct, volumes_xr = torch.split(volumes, 1)
         volumes_ct = volumes_ct.repeat(n_views, 1, 1, 1, 1)
         volumes = torch.cat([volumes_ct, volumes_xr])
-
         return volumes 
 
-def init_weights(net, init_type='normal', init_gain=0.02):
-    """Initialize network weights.
-    Parameters:
-        net (network)   -- network to be initialized
-        init_type (str) -- the name of an initialization method: normal | xavier | kaiming | orthogonal
-        init_gain (float)    -- scaling factor for normal, xavier and orthogonal.
-    We use 'normal' in the original pix2pix and CycleGAN paper. But xavier and kaiming might
-    work better for some applications. Feel free to try yourself.
-    """
-    def init_func(m):  # define the initialization function
-        classname = m.__class__.__name__
-        if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
-            if init_type == 'normal':
-                nn.init.normal_(m.weight.data, 0.0, init_gain)
-            elif init_type == 'xavier':
-                nn.init.xavier_normal_(m.weight.data, gain=init_gain)
-            elif init_type == 'kaiming':
-                nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
-            elif init_type == 'orthogonal':
-                nn.init.orthogonal_(m.weight.data, gain=init_gain)
-            else:
-                raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
-            if hasattr(m, 'bias') and m.bias is not None:
-                nn.init.constant_(m.bias.data, 0.0)
-        elif classname.find('BatchNorm') != -1:  # BatchNorm Layer's weight is not a matrix; only normal distribution applies.
-            nn.init.normal_(m.weight.data, 1.0, init_gain)
-            nn.init.constant_(m.bias.data, 0.0)
-    # print('initialize network with %s' % init_type)
-    net.apply(init_func)  # apply the initialization function <init_func>
-def mean_and_tanh(x, eps=1e-8): return ( F.tanh(x.mean(dim=1, keepdim=True)) * 0.5 + 0.5 )  
-def mean_and_relu(x, eps=1e-8): return ( F.relu(x.mean(dim=1, keepdim=True)) )  
 def make_cameras(dist, elev, azim):
     assert dist.device == elev.device == azim.device
     _device = dist.device
@@ -281,23 +251,13 @@ class PixelNeRVLightningModule(LightningModule):
         self.devices = hparams.devices
         
         self.save_hyperparameters()
-    
-        self.det_renderer = DirectVolumeFrontToBackRenderer(
-            image_width=self.shape, 
-            image_height=self.shape, 
-            n_pts_per_ray=self.n_pts_per_ray, 
-            min_depth=2.0, 
-            max_depth=6.0, 
-            stratified_sampling=False
-        )
 
-        self.sto_renderer = DirectVolumeFrontToBackRenderer(
+        self.fwd_renderer = DirectVolumeStratifiedFrontToBackRenderer(
             image_width=self.shape, 
             image_height=self.shape, 
             n_pts_per_ray=self.n_pts_per_ray, 
             min_depth=2.0, 
             max_depth=6.0, 
-            stratified_sampling=True
         )
         
         self.inv_renderer = PixelNeRVFrontToBackInverseRenderer(
@@ -330,10 +290,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras, stratified_sampling=False):   
-        if stratified_sampling:       
-            return self.sto_renderer(image3d, cameras) 
-        else:
-            return self.det_renderer(image3d, cameras) 
+        return self.fwd_renderer(image3d, cameras, stratified_sampling) 
 
     def forward_volume(self, image2d, azim, elev, n_views=2):      
         return self.inv_renderer(image2d * 2.0 - 1.0, azim.squeeze(), elev.squeeze(), n_views) 
@@ -440,8 +397,6 @@ class PixelNeRVLightningModule(LightningModule):
         im3d_loss_ct_random = self.loss(image3d, est_volume_ct_random) + self.loss(image3d, mid_volume_ct_random) 
         im3d_loss_ct_hidden = self.loss(image3d, est_volume_ct_hidden) + self.loss(image3d, mid_volume_ct_hidden) 
     
-        # view_loss_ct_random = self.loss(src_azim_random, est_azim_random) \
-        #                     + self.loss(src_elev_random, est_elev_random)
         view_loss_ct_random = self.loss(torch.cat([src_azim_random, src_elev_random]), 
                                         torch.cat([est_azim_random, est_elev_random]))
 
@@ -541,29 +496,19 @@ class PixelNeRVLightningModule(LightningModule):
         return self._common_epoch_end(outputs, stage='test')
 
     def configure_optimizers(self):
-        # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
+        opt_gen = torch.optim.AdamW([
+            {'params': self.inv_renderer.parameters()},
+            {'params': self.cam_settings.parameters()}
+        ], lr=self.lr, betas=(0.5, 0.999))
+        opt_dis = torch.optim.AdamW([
+            {'params': self.critic_model.parameters()},
+        ], lr=self.lr, betas=(0.5, 0.999))
+        sch_gen = torch.optim.lr_scheduler.MultiStepLR(opt_gen, milestones=[100, 200], gamma=0.1)
+        sch_dis = torch.optim.lr_scheduler.MultiStepLR(opt_dis, milestones=[100, 200], gamma=0.1)
+        return [opt_gen, opt_dis], [sch_gen, sch_dis]
+        # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.5, 0.999))
         # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
         # return [optimizer], [scheduler]
-        # opt_inv = torch.optim.AdamW(self.inv_renderer.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        # opt_cam = torch.optim.AdamW(self.cam_settings.parameters(), lr=self.lr, betas=(0.9, 0.999))
-        # sch_inv = torch.optim.lr_scheduler.MultiStepLR(opt_inv, milestones=[100, 200], gamma=0.1)
-        # sch_cam = torch.optim.lr_scheduler.MultiStepLR(opt_cam, milestones=[100, 200], gamma=0.1)
-        # return [opt_inv, opt_cam], [sch_inv, sch_cam]
-        if self.gan:
-            opt_gen = torch.optim.AdamW([
-                {'params': self.inv_renderer.parameters()},
-                {'params': self.cam_settings.parameters()}
-            ], lr=self.lr, betas=(0.5, 0.999))
-            opt_dis = torch.optim.AdamW([
-                {'params': self.critic_model.parameters()},
-            ], lr=self.lr, betas=(0.5, 0.999))
-            sch_gen = torch.optim.lr_scheduler.MultiStepLR(opt_gen, milestones=[100, 200], gamma=0.1)
-            sch_dis = torch.optim.lr_scheduler.MultiStepLR(opt_dis, milestones=[100, 200], gamma=0.1)
-            return [opt_gen, opt_dis], [sch_gen, sch_dis]
-        else:
-            optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.5, 0.999))
-            scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200], gamma=0.1)
-            return [optimizer], [scheduler]
 
 if __name__ == "__main__":
     parser = ArgumentParser()
