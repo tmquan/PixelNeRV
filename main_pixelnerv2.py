@@ -290,7 +290,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras, stratified_sampling=False):   
-        return self.fwd_renderer(image3d, cameras, stratified_sampling) 
+        return self.fwd_renderer(image3d, cameras, stratified_sampling=stratified_sampling) 
 
     def forward_volume(self, image2d, azim, elev, n_views=2):      
         return self.inv_renderer(image2d * 2.0 - 1.0, azim.squeeze(), elev.squeeze(), n_views) 
