@@ -307,8 +307,10 @@ class PixelNeRVLightningModule(LightningModule):
         image2d = batch["image2d"]
             
         # Construct the random cameras
-        src_azim_random = torch.randn(self.batch_size, device=_device).clamp_(-0.9, 0.9)
-        src_elev_random = torch.randn(self.batch_size, device=_device).clamp_(-0.9, 0.9)
+        # src_azim_random = torch.randn(self.batch_size, device=_device).clamp_(-0.9, 0.9)
+        # src_elev_random = torch.randn(self.batch_size, device=_device).clamp_(-0.9, 0.9)
+        src_azim_random = torch.distributions.uniform.Uniform(-1, 1).sample([self.batch_size]).to(_device) 
+        src_elev_random = torch.distributions.uniform.Uniform(-1, 1).sample([self.batch_size]).to(_device) 
         src_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
         camera_random = make_cameras(src_dist_random, src_elev_random, src_azim_random)
 
