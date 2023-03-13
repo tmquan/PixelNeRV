@@ -266,6 +266,7 @@ class PixelNeRVLightningModule(LightningModule):
         self.theta = hparams.theta
         self.omega = hparams.omega
         self.lambda_gp = hparams.lambda_gp
+        self.clamp_val = hparams.clamp_val
        
         self.logsdir = hparams.logsdir
        
@@ -476,7 +477,7 @@ class PixelNeRVLightningModule(LightningModule):
             elif optimizer_idx==1:
                 # Clamp parameters to enforce Lipschitz constraint
                 for p in self.critic_model.parameters():
-                    p.data.clamp_(-0.1, 0.1)
+                    p.data.clamp_(-self.clamp_val, self.clamp_val)
                 
                 # Compute discriminator loss
                 real_images = torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden])
@@ -590,6 +591,7 @@ if __name__ == "__main__":
     parser.add_argument("--theta", type=float, default=1., help="cam loss")
     parser.add_argument("--omega", type=float, default=1., help="cam cond")
     parser.add_argument("--lambda_gp", type=float, default=10, help="gradient penalty")
+    parser.add_argument("--clamp_val", type=float, default=.1, help="gradient discrim clamp value")
     
     parser.add_argument("--lr", type=float, default=2e-4, help="adam: learning rate")
     parser.add_argument("--ckpt", type=str, default=None, help="path to checkpoint")
