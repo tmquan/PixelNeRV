@@ -281,12 +281,22 @@ class PixelNeRVLightningModule(LightningModule):
         
         self.save_hyperparameters()
     
-        self.fwd_renderer = DirectVolumeFrontToBackRenderer(
+        self.det_renderer = DirectVolumeFrontToBackRenderer(
             image_width=self.shape, 
             image_height=self.shape, 
             n_pts_per_ray=self.n_pts_per_ray, 
             min_depth=2.0, 
-            max_depth=6.0
+            max_depth=6.0, 
+            stratified_sampling=False
+        )
+
+        self.sto_renderer = DirectVolumeFrontToBackRenderer(
+            image_width=self.shape, 
+            image_height=self.shape, 
+            n_pts_per_ray=self.n_pts_per_ray, 
+            min_depth=2.0, 
+            max_depth=6.0, 
+            stratified_sampling=True
         )
         
         self.inv_renderer = PixelNeRVFrontToBackInverseRenderer(
@@ -318,8 +328,11 @@ class PixelNeRVLightningModule(LightningModule):
 
         self.loss = nn.L1Loss(reduction="mean")
 
-    def forward_screen(self, image3d, cameras):      
-        return self.fwd_renderer(image3d, cameras) 
+    def forward_screen(self, image3d, cameras, stratified_sampling=False):   
+        if stratified_sampling:       
+            return self.sto_renderer(image3d, cameras) 
+        else:
+            return self.det_renderer(image3d, cameras) 
 
     def forward_volume(self, image2d, azim, elev, n_views=2):      
         return self.inv_renderer(image2d * 2.0 - 1.0, azim.squeeze(), elev.squeeze(), n_views) 
@@ -342,7 +355,7 @@ class PixelNeRVLightningModule(LightningModule):
         camera_random = make_cameras(src_dist_random, src_elev_random, src_azim_random)
 
         with torch.no_grad():
-            est_figure_ct_random = self.forward_screen(image3d=image3d, cameras=camera_random)
+            est_figure_ct_random = self.forward_screen(image3d=image3d, cameras=camera_random, stratified_sampling=False)
             src_figure_xr_hidden = image2d
 
         est_dist_random = 4.0 * torch.ones(self.batch_size, device=_device)
@@ -364,7 +377,7 @@ class PixelNeRVLightningModule(LightningModule):
         camera_hidden = make_cameras(est_dist_hidden, est_elev_hidden, est_azim_hidden)
 
         with torch.no_grad():
-            est_figure_ct_hidden = self.forward_screen(image3d=image3d, cameras=camera_hidden)
+            est_figure_ct_hidden = self.forward_screen(image3d=image3d, cameras=camera_hidden, stratified_sampling=False)
 
         cam_view = [self.batch_size, 1]       
         # Jointly estimate the volumes, single view, random view and multiple views
@@ -404,9 +417,9 @@ class PixelNeRVLightningModule(LightningModule):
             )    
            
         # Reconstruct the appropriate XR
-        rec_figure_ct_random = self.forward_screen(image3d=est_volume_ct_random[:,1:], cameras=camera_random)
-        rec_figure_ct_hidden = self.forward_screen(image3d=est_volume_ct_hidden[:,1:], cameras=camera_hidden)
-        est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden[:,1:], cameras=camera_hidden)
+        rec_figure_ct_random = self.forward_screen(image3d=est_volume_ct_random[:,1:], cameras=camera_random, stratified_sampling=(stage=='train'))
+        rec_figure_ct_hidden = self.forward_screen(image3d=est_volume_ct_hidden[:,1:], cameras=camera_hidden, stratified_sampling=(stage=='train'))
+        est_figure_xr_hidden = self.forward_screen(image3d=est_volume_xr_hidden[:,1:], cameras=camera_hidden, stratified_sampling=(stage=='train'))
 
         # Perform Post activation like DVGO      
         mid_volume_ct_random = est_volume_ct_random[:,:1]
@@ -463,7 +476,7 @@ class PixelNeRVLightningModule(LightningModule):
             elif optimizer_idx==1:
                 # Clamp parameters to enforce Lipschitz constraint
                 for p in self.critic_model.parameters():
-                    p.data.clamp_(-0.01, 0.01)
+                    p.data.clamp_(-0.1, 0.1)
                 
                 # Compute discriminator loss
                 real_images = torch.cat([est_figure_ct_random, est_figure_ct_hidden, src_figure_xr_hidden])

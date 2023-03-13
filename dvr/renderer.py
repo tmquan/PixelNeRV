@@ -20,7 +20,8 @@ class DirectVolumeRenderer(nn.Module):
         image_height: int = 256,
         n_pts_per_ray: int = 320, 
         min_depth: float = 2.0,
-        max_depth: float = 6.0
+        max_depth: float = 6.0, 
+        stratified_sampling: bool = False,
     ):
         super().__init__()
         self.raysampler = NDCMultinomialRaysampler(  
@@ -29,6 +30,7 @@ class DirectVolumeRenderer(nn.Module):
             n_pts_per_ray=n_pts_per_ray,  
             min_depth=min_depth,
             max_depth=max_depth,
+            stratified_sampling=stratified_sampling, 
         )
         self.raymarcher = EmissionAbsorptionRaymarcher()  # BackToFront Raymarcher
         self.renderer = VolumeRenderer(
@@ -91,7 +93,8 @@ class DirectVolumeFrontToBackRenderer(DirectVolumeRenderer):
         image_height: int = 256,
         n_pts_per_ray: int = 320, 
         min_depth: float = 2.0,
-        max_depth: float = 6.0
+        max_depth: float = 6.0, 
+        stratified_sampling: bool = False,
     ):
         super().__init__()
         self.raysampler = NDCMultinomialRaysampler(
@@ -100,6 +103,7 @@ class DirectVolumeFrontToBackRenderer(DirectVolumeRenderer):
             n_pts_per_ray=n_pts_per_ray,
             min_depth=min_depth,
             max_depth=max_depth,
+            stratified_sampling=stratified_sampling,
         )
         self.raymarcher = EmissionAbsorptionFrontToBackRaymarcher()  # FrontToBack
         self.renderer = VolumeRenderer(
